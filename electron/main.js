@@ -494,9 +494,10 @@ ipcMain.handle('server:stop', (_e, id) => stopServer(id))
 ipcMain.handle('repo:dockerBuild', (_e, id) => dockerBuild(id))
 ipcMain.handle('repo:dockerRun', (_e, id) => dockerRun(id))
 ipcMain.handle('docker:openApp', () => {
-  // Open the Docker Desktop dashboard window (deep link is reliable even when Docker
-  // is already running in the menu bar); fall back to launching the app.
-  shell.openExternal('docker-desktop://dashboard').catch(() => exec('open -a Docker'))
+  // The Docker Desktop *dashboard* is a separate Electron app (com.electron.dockerdesktop);
+  // `open -a Docker` only activates the launcher and won't surface the window. Target the GUI
+  // app directly, falling back to the launcher.
+  exec('open -b com.electron.dockerdesktop', (err) => { if (err) exec('open -a Docker') })
   return true
 })
 ipcMain.handle('repo:setScript', (_e, id, script) => {
