@@ -36,10 +36,18 @@ Korean.
 
 ## Develop
 
+Written in **TypeScript** (`electron/*.ts`, `src/renderer.ts`); `npm start` type-checks and
+compiles with `tsc` before launching.
+
 ```sh
 npm install
-npm start
+npm start        # tsc && electron .
+npm run build    # tsc only
+npm test         # vitest — unit tests for the pure logic in electron/detect.ts
 ```
+
+Pure, dependency-free logic (framework / package-manager detection, lsof + `docker ps` + cmux
+parsing, port filtering) lives in `electron/detect.ts` and is covered by `tests/`.
 
 ## Build a .app / .dmg
 

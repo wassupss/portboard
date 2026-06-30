@@ -1,8 +1,6 @@
-'use strict'
+import { contextBridge, ipcRenderer } from 'electron'
 
-const { contextBridge, ipcRenderer } = require('electron')
-
-contextBridge.exposeInMainWorld('api', {
+const api: PortboardApi = {
   getConfig: () => ipcRenderer.invoke('config:get'),
   snapshot: () => ipcRenderer.invoke('snapshot'),
 
@@ -32,8 +30,10 @@ contextBridge.exposeInMainWorld('api', {
   dockerTail: (cid) => ipcRenderer.invoke('docker:tail', cid),
   dockerUntail: (cid) => ipcRenderer.invoke('docker:untail', cid),
 
-  onFocusRepo: (cb) => ipcRenderer.on('focus:repo', (_e, id) => cb(id)),
-  onLog: (cb) => ipcRenderer.on('server:log', (_e, d) => cb(d)),
-  onStarted: (cb) => ipcRenderer.on('server:started', (_e, d) => cb(d)),
-  onExit: (cb) => ipcRenderer.on('server:exit', (_e, d) => cb(d)),
-})
+  onFocusRepo: (cb) => { ipcRenderer.on('focus:repo', (_e, id) => cb(id)) },
+  onLog: (cb) => { ipcRenderer.on('server:log', (_e, d) => cb(d)) },
+  onStarted: (cb) => { ipcRenderer.on('server:started', (_e, d) => cb(d)) },
+  onExit: (cb) => { ipcRenderer.on('server:exit', (_e, d) => cb(d)) },
+}
+
+contextBridge.exposeInMainWorld('api', api)

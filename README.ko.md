@@ -34,10 +34,18 @@
 
 ## 개발
 
+**TypeScript**로 작성되어 있습니다(`electron/*.ts`, `src/renderer.ts`). `npm start`는 실행 전에
+`tsc`로 타입체크·컴파일합니다.
+
 ```sh
 npm install
-npm start
+npm start        # tsc && electron .
+npm run build    # tsc만
+npm test         # vitest — electron/detect.ts 순수 로직 단위 테스트
 ```
+
+순수·의존성 없는 로직(프레임워크/패키지매니저 감지, lsof·`docker ps`·cmux 파싱, 포트 필터링)은
+`electron/detect.ts`에 모아 두었고 `tests/`에서 테스트합니다.
 
 ## .app / .dmg 빌드
 

@@ -7,12 +7,18 @@
   "author": "wassupss",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "dist": "electron-builder --mac"
+    "build": "tsc",
+    "start": "tsc && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "tsc && electron-builder --mac"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   },
   "build": {
     "appId": "com.wassupss.portboard",

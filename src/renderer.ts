@@ -1,7 +1,7 @@
-'use strict'
+// Renderer runs as a plain browser script (no imports/exports). Types via src/global.d.ts.
 
 // ---------- i18n ----------
-const I18N = {
+const I18N: Record<'ko' | 'en', Record<string, string>> = {
   ko: {
     menu: '메뉴 ▾', m_import: '가져오기', m_lang: '언어', toDesktop: '데스크탑 창으로', toMenubar: '메뉴바 팝오버로',
     src_cmux: 'cmux 워크스페이스', src_git: '로컬 Git 저장소…', src_folder: '폴더에서 추가…',
@@ -23,26 +23,31 @@ const I18N = {
     postman: 'Postman', postmanTip: 'Copy URL and open Postman', openDockerTip: 'Open Docker Desktop',
   },
 }
-let LANG = 'ko'
-const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.ko[k] || k
+let LANG: 'ko' | 'en' = 'ko'
+const t = (k: string): string => (I18N[LANG] && I18N[LANG][k]) || I18N.ko[k] || k
 
-// ---------- state ----------
-const listEl = document.getElementById('list')
-const logPane = document.getElementById('logpane')
-const logBody = document.getElementById('log-body')
-const logTitle = document.getElementById('log-title')
+// ---------- elements ----------
+const listEl = document.getElementById('list')!
+const logPane = document.getElementById('logpane')!
+const logBody = document.getElementById('log-body')!
+const logTitle = document.getElementById('log-title')!
+const menuBtn = document.getElementById('btn-menu')!
+const appMenu = document.getElementById('app-menu')!
+const dockerBtn = document.getElementById('btn-docker')!
+const brandCount = document.getElementById('brand-count')!
+const logCloseBtn = document.getElementById('log-close')!
 
-let selectedId = null
-let repoNames = {}
+let selectedId: string | null = null
+const repoNames: Record<string, string> = {}
 let postmanAvailable = false
 
-function el(tag, cls, text) {
+function el(tag: string, cls?: string | null, text?: string | null): any {
   const e = document.createElement(tag)
   if (cls) e.className = cls
   if (text != null) e.textContent = text
   return e
 }
-function portBadge(port) {
+function portBadge(port: number): any {
   const b = el('span', 'badge port', `:${port}`)
   b.style.cursor = 'pointer'
   b.title = t('openBrowserTip')
@@ -51,8 +56,8 @@ function portBadge(port) {
 }
 
 // ---------- rows ----------
-// card: [dot] [ body: line1 = name + path(ellipsis right) ; line2 = badges(left) + buttons(right) ]
-function makeCard(running, name, pathText) {
+// card: [ body: line1 = dot + name + path(ellipsis) ; line2 = badges(left) + buttons(right) ]
+function makeCard(running: boolean, name: string, pathText?: string) {
   const row = el('div', 'row card')
   const body = el('div', 'row-body')
   const line1 = el('div', 'row-line1')
@@ -68,7 +73,7 @@ function makeCard(running, name, pathText) {
   return { row, badges, controls }
 }
 
-function repoRow(r) {
+function repoRow(r: any): any {
   repoNames[r.id] = r.name
   const { row, badges, controls } = makeCard(r.running, r.name, r.path)
 
@@ -82,7 +87,7 @@ function repoRow(r) {
     stop.onclick = () => window.api.stop(r.id)
     controls.appendChild(stop)
   } else {
-    const scripts = r.scripts || []
+    const scripts: string[] = r.scripts || []
     const opts = ['dev', 'start'].filter((s) => scripts.includes(s))
     if (opts.length) {
       const sel = el('select', 'script-select')
@@ -129,11 +134,11 @@ function repoRow(r) {
   return row
 }
 
-function containerRow(c) {
+function containerRow(c: any): any {
   repoNames['docker:' + c.id] = c.name
   const { row, badges, controls } = makeCard(c.state === 'running', c.name, `${c.image} · ${c.status}`)
 
-  c.ports.forEach((port) => badges.appendChild(portBadge(port)))
+  c.ports.forEach((port: number) => badges.appendChild(portBadge(port)))
   badges.appendChild(el('span', 'badge', 'docker'))
 
   if (c.state === 'running') {
@@ -152,7 +157,7 @@ function containerRow(c) {
   return row
 }
 
-function discoveredRow(p) {
+function discoveredRow(p: any): any {
   const { row, badges, controls } = makeCard(true, `:${p.port}`, `${p.command} · pid ${p.pid}${p.cwd ? ' · ' + p.cwd : ''}`)
   badges.appendChild(el('span', 'badge', p.command))
   const open = el('button', 'ghost small', t('open'))
@@ -169,14 +174,14 @@ async function refresh() {
   postmanAvailable = !!snap.postmanAvailable
   listEl.innerHTML = ''
 
-  const runningRepos = repos.filter((r) => r.running)
-  const stoppedRepos = repos.filter((r) => !r.running)
+  const runningRepos = repos.filter((r: any) => r.running)
+  const stoppedRepos = repos.filter((r: any) => !r.running)
 
-  const runningCount = runningRepos.length + containers.filter((c) => c.state === 'running').length + discovered.length
+  const runningCount = runningRepos.length + containers.filter((c: any) => c.state === 'running').length + discovered.length
   brandCount.textContent = String(runningCount)
   brandCount.hidden = runningCount === 0
 
-  const section = (label, items, build) => {
+  const section = (label: string, items: any[], build: (x: any) => any) => {
     if (!items.length) return
     listEl.appendChild(el('div', 'group-label', label))
     items.forEach((x) => listEl.appendChild(build(x)))
@@ -194,15 +199,15 @@ async function refresh() {
 }
 
 // ---------- logs ----------
-function appendLog(stream, text) {
+function appendLog(stream: string, text: string) {
   const span = el('span', stream === 'err' ? 'err' : null, text)
   logBody.appendChild(span)
   logBody.scrollTop = logBody.scrollHeight
 }
-function stopDockerTailIfAny(id) {
+function stopDockerTailIfAny(id: string | null) {
   if (typeof id === 'string' && id.startsWith('docker:')) window.api.dockerUntail(id.slice(7))
 }
-async function openLogs(id) {
+async function openLogs(id: string) {
   if (selectedId && selectedId !== id) stopDockerTailIfAny(selectedId)
   selectedId = id
   if (id.startsWith('docker:')) await window.api.dockerTail(id.slice(7))
@@ -212,35 +217,29 @@ async function openLogs(id) {
   lines.forEach((l) => appendLog(l.stream, l.text))
   logPane.hidden = false
 }
-document.getElementById('log-close').onclick = () => {
+logCloseBtn.onclick = () => {
   stopDockerTailIfAny(selectedId)
   logPane.hidden = true
   selectedId = null
 }
 
 // ---------- header / unified menu ----------
-const menuBtn = document.getElementById('btn-menu')
-const appMenu = document.getElementById('app-menu')
-const dockerBtn = document.getElementById('btn-docker')
-const brandCount = document.getElementById('brand-count')
-const logCloseBtn = document.getElementById('log-close')
-
 function applyStaticI18n() {
   menuBtn.textContent = t('menu')
   dockerBtn.title = t('openDockerTip')
   logCloseBtn.textContent = t('back')
-  appMenu.querySelector('[data-i="m_import"]').textContent = t('m_import')
-  appMenu.querySelector('[data-i="m_lang"]').textContent = t('m_lang')
-  appMenu.querySelector('[data-act="import-cmux"] .label').textContent = t('src_cmux')
-  appMenu.querySelector('[data-act="import-git"] .label').textContent = t('src_git')
-  appMenu.querySelector('[data-act="import-folder"] .label').textContent = t('src_folder')
+  appMenu.querySelector('[data-i="m_import"]')!.textContent = t('m_import')
+  appMenu.querySelector('[data-i="m_lang"]')!.textContent = t('m_lang')
+  appMenu.querySelector('[data-act="import-cmux"] .label')!.textContent = t('src_cmux')
+  appMenu.querySelector('[data-act="import-git"] .label')!.textContent = t('src_git')
+  appMenu.querySelector('[data-act="import-folder"] .label')!.textContent = t('src_folder')
 }
 
 async function populateMenu() {
   const desktop = await window.api.getDesktop()
-  appMenu.querySelector('[data-act="lang-ko"] .ic').textContent = LANG === 'ko' ? '✓' : ''
-  appMenu.querySelector('[data-act="lang-en"] .ic').textContent = LANG === 'en' ? '✓' : ''
-  appMenu.querySelector('[data-act="view"] .label').textContent = desktop ? t('toMenubar') : t('toDesktop')
+  appMenu.querySelector('[data-act="lang-ko"] .ic')!.textContent = LANG === 'ko' ? '✓' : ''
+  appMenu.querySelector('[data-act="lang-en"] .ic')!.textContent = LANG === 'en' ? '✓' : ''
+  appMenu.querySelector('[data-act="view"] .label')!.textContent = desktop ? t('toMenubar') : t('toDesktop')
 }
 
 menuBtn.onclick = async (e) => {
@@ -249,17 +248,17 @@ menuBtn.onclick = async (e) => {
 }
 document.addEventListener('click', () => { appMenu.hidden = true })
 appMenu.querySelectorAll('.popmenu-item').forEach((b) => {
-  b.onclick = async (e) => {
+  ;(b as HTMLElement).onclick = async (e) => {
     e.stopPropagation()
     appMenu.hidden = true
-    const act = b.dataset.act
+    const act = (b as HTMLElement).dataset.act
     if (act === 'import-cmux') { await window.api.importCmux(); refresh() }
     else if (act === 'import-git') { await window.api.addGit(); refresh() }
     else if (act === 'import-folder') { await window.api.addRepo(); refresh() }
     else if (act === 'lang-ko' || act === 'lang-en') {
-      const l = act.slice(5)
+      const l = act.slice(5) as 'ko' | 'en'
       if (l !== LANG) { LANG = l; await window.api.setLang(l); applyStaticI18n(); refresh() }
-    } else if (act === 'view') window.api.toggleDesktop() // window recreated → page reloads
+    } else if (act === 'view') window.api.toggleDesktop()
   }
 })
 dockerBtn.onclick = (e) => { e.stopPropagation(); window.api.openDockerApp() }

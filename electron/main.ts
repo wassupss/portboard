@@ -1,19 +1,22 @@
-'use strict'
-
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen, clipboard } = require('electron')
-const path = require('path')
-const fs = require('fs')
-const os = require('os')
-const { spawn, exec } = require('child_process')
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen, clipboard } from 'electron'
+import * as path from 'path'
+import * as fs from 'fs'
+import * as os from 'os'
+import { spawn, exec } from 'child_process'
+import {
+  pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName,
+  isUnder, parseLsofListen, parseDockerPs, parseCmuxEvents, filterDiscovered,
+  type Pm,
+} from './detect'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'devdock.json')
 
-// id -> { child, logs: [{stream,text}], pm, startedAt }
-const running = new Map()
-const dockerTails = new Map() // containerId -> { child, logs: [] }
-const buildTasks = new Map()  // 'build:<repoId>' -> { child, logs: [] }
-let win = null
-let tray = null
+interface Task { child: any; logs: LogLine[]; pm?: string; startedAt?: number }
+const running = new Map<string, Task>()
+const dockerTails = new Map<string, Task>()
+const buildTasks = new Map<string, Task>()
+let win: BrowserWindow | null = null
+let tray: Tray | null = null
 let dockerOk = false
 let dialogOpen = false // suppress popover blur-hide while a native dialog is open
 let desktopMode = false // false = menu-bar popover, true = normal desktop window
@@ -24,7 +27,7 @@ const POSTMAN_AVAILABLE = (() => {
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 // Run a command through a login shell so PATH (docker, pnpm, node shims) resolves like Terminal.
-function loginExec(cmd) {
+function loginExec(cmd: string): Promise<{ err: any; stdout: string }> {
   return new Promise((resolve) => {
     exec(`${SHELL} -lc ${JSON.stringify(cmd)}`, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       resolve({ err, stdout: stdout || '' })
@@ -33,71 +36,38 @@ function loginExec(cmd) {
 }
 
 // ---------- config ----------
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
-  } catch {
-    return { repos: [] }
-  }
+function loadConfig(): any {
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) } catch { return { repos: [] } }
 }
-function saveConfig(cfg) {
+function saveConfig(cfg: any) {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
 }
 
 // ---------- i18n (tray / menus) ----------
-function lang() { return loadConfig().lang === 'en' ? 'en' : 'ko' }
-const TRAY_I18N = {
-  ko: { open: '열기', quit: 'Portboard 종료', ports: (n) => `Portboard — ${n}개 포트 열림`, idle: 'Portboard' },
-  en: { open: 'Open', quit: 'Quit Portboard', ports: (n) => `Portboard — ${n} ports open`, idle: 'Portboard' },
+function lang(): 'ko' | 'en' { return loadConfig().lang === 'en' ? 'en' : 'ko' }
+const TRAY_I18N: Record<'ko' | 'en', Record<string, any>> = {
+  ko: { open: '열기', quit: 'Portboard 종료', ports: (n: number) => `Portboard — ${n}개 포트 열림`, idle: 'Portboard' },
+  en: { open: 'Open', quit: 'Quit Portboard', ports: (n: number) => `Portboard — ${n} ports open`, idle: 'Portboard' },
 }
-function tm(k, ...a) { const d = TRAY_I18N[lang()][k]; return typeof d === 'function' ? d(...a) : d }
+function tm(k: string, ...a: any[]) { const d = TRAY_I18N[lang()][k]; return typeof d === 'function' ? d(...a) : d }
 
-// ---------- package manager detection ----------
-function detectPm(repoPath) {
-  const has = (f) => fs.existsSync(path.join(repoPath, f))
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(repoPath, 'package.json'), 'utf8'))
-    if (pkg.packageManager) {
-      const name = String(pkg.packageManager).split('@')[0]
-      if (['pnpm', 'yarn', 'npm'].includes(name)) return name
-    }
-  } catch {}
-  if (has('pnpm-lock.yaml')) return 'pnpm'
-  if (has('yarn.lock')) return 'yarn'
-  if (has('package-lock.json')) return 'npm'
-  return 'npm'
-}
-// Identify the framework (and whether it's a backend/API server) from package.json deps.
-function detectFramework(deps) {
-  const has = (n) => n in deps
-  const backend = ['@nestjs/core', 'express', 'fastify', 'koa', '@hapi/hapi', 'restify', 'hono', '@adonisjs/core']
-  const isBackend = backend.some(has)
-  let framework = null
-  if (has('next')) framework = 'Next.js'
-  else if (has('nuxt')) framework = 'Nuxt'
-  else if (has('@remix-run/react') || has('@remix-run/node')) framework = 'Remix'
-  else if (has('astro')) framework = 'Astro'
-  else if (has('@sveltejs/kit')) framework = 'SvelteKit'
-  else if (has('@angular/core')) framework = 'Angular'
-  else if (has('gatsby')) framework = 'Gatsby'
-  else if (has('@nestjs/core')) framework = 'NestJS'
-  else if (has('express')) framework = 'Express'
-  else if (has('fastify')) framework = 'Fastify'
-  else if (has('koa')) framework = 'Koa'
-  else if (has('@hapi/hapi')) framework = 'Hapi'
-  else if (has('hono')) framework = 'Hono'
-  else if (has('vite')) framework = has('vue') ? 'Vue + Vite' : has('react') ? 'React + Vite' : has('svelte') ? 'Svelte + Vite' : 'Vite'
-  else if (has('react')) framework = 'React'
-  else if (has('vue')) framework = 'Vue'
-  else if (has('svelte')) framework = 'Svelte'
-  return { framework, isBackend }
+// ---------- package manager / repo metadata ----------
+function detectPm(repoPath: string): Pm {
+  let packageManager: string | undefined
+  try { packageManager = JSON.parse(fs.readFileSync(path.join(repoPath, 'package.json'), 'utf8')).packageManager } catch {}
+  return pickPm({
+    packageManager,
+    pnpmLock: fs.existsSync(path.join(repoPath, 'pnpm-lock.yaml')),
+    yarnLock: fs.existsSync(path.join(repoPath, 'yarn.lock')),
+    npmLock: fs.existsSync(path.join(repoPath, 'package-lock.json')),
+  })
 }
 
-function repoMeta(repoPath) {
+function repoMeta(repoPath: string) {
   let hasStart = false
-  let scripts = []
-  let framework = null
+  let scripts: string[] = []
+  let framework: string | null = null
   let isBackend = false
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoPath, 'package.json'), 'utf8'))
@@ -106,7 +76,7 @@ function repoMeta(repoPath) {
     const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }
     ;({ framework, isBackend } = detectFramework(deps))
   } catch {}
-  let git = null
+  let git: string | null = null
   try {
     const conf = fs.readFileSync(path.join(repoPath, '.git', 'config'), 'utf8')
     const m = conf.match(/url\s*=\s*(.+)/)
@@ -118,53 +88,51 @@ function repoMeta(repoPath) {
 }
 
 // ---------- process management ----------
-function emit(channel, payload) {
+function emit(channel: string, payload: any) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
 }
 
-// Common build-output dirs; if present we assume `start` doesn't need a fresh build.
-function hasBuildOutput(repoPath) {
+function hasBuildOutput(repoPath: string): boolean {
   return ['dist', 'build', '.next', '.output', '.svelte-kit', 'out', '.nuxt'].some((d) => {
     try { return fs.existsSync(path.join(repoPath, d)) } catch { return false }
   })
 }
 
-function startServer(repo) {
+function startServer(repo: any) {
   if (running.has(repo.id)) return
   const meta = repoMeta(repo.path)
   const pm = repo.pm || meta.pm
   const script = repo.script || (meta.scripts.includes('dev') ? 'dev' : 'start')
   const shellPath = process.env.SHELL || '/bin/zsh'
-  // `start` needs built output — build first when a build script exists but no output is present.
-  const prefixBuild = script === 'start' && meta.scripts.includes('build') && !hasBuildOutput(repo.path)
-  const cmd = prefixBuild ? `${pm} run build && ${pm} run ${script}` : `${pm} run ${script}`
+  const cmd = needsBuild(script, meta.scripts, hasBuildOutput(repo.path))
+    ? `${pm} run build && ${pm} run ${script}`
+    : `${pm} run ${script}`
 
-  // Login shell so PATH/version-manager shims (pnpm, yarn, node) resolve like a Terminal.
-  // detached:true puts the child in its own process group so we can kill the whole tree.
+  // Login shell so PATH/version-manager shims resolve like a Terminal; detached → own group.
   const child = spawn(shellPath, ['-lc', cmd], {
     cwd: repo.path,
     detached: true,
     env: { ...process.env, FORCE_COLOR: '0' },
   })
 
-  const entry = { child, logs: [], pm, startedAt: Date.now() }
+  const entry: Task = { child, logs: [], pm, startedAt: Date.now() }
   running.set(repo.id, entry)
 
-  const push = (data, stream) => {
+  const push = (data: any, stream: string) => {
     const text = data.toString()
     entry.logs.push({ stream, text })
     if (entry.logs.length > 3000) entry.logs.shift()
     emit('server:log', { id: repo.id, stream, text })
   }
   push(Buffer.from(`[portboard] $ ${cmd}\n`), 'out')
-  child.stdout.on('data', (d) => push(d, 'out'))
-  child.stderr.on('data', (d) => push(d, 'err'))
-  child.on('exit', (code, signal) => {
+  child.stdout.on('data', (d: any) => push(d, 'out'))
+  child.stderr.on('data', (d: any) => push(d, 'err'))
+  child.on('exit', (code: number, signal: string) => {
     running.delete(repo.id)
     emit('server:exit', { id: repo.id, code, signal })
     refreshTray()
   })
-  child.on('error', (err) => {
+  child.on('error', (err: any) => {
     push(Buffer.from(`\n[portboard] failed to start: ${err.message}\n`), 'err')
   })
 
@@ -172,7 +140,7 @@ function startServer(repo) {
   refreshTray()
 }
 
-function stopServer(id) {
+function stopServer(id: string) {
   const entry = running.get(id)
   if (!entry) return
   const pid = entry.child.pid
@@ -182,40 +150,24 @@ function stopServer(id) {
   }, 4000)
 }
 
-// Only dev / start are offered as run targets.
-function runnableScripts(scripts = []) {
-  return ['dev', 'start'].filter((s) => scripts.includes(s))
-}
-
-function startRepoWithScript(id, script) {
+function startRepoWithScript(id: string, script?: string) {
   const cfg = loadConfig()
-  const repo = cfg.repos.find((r) => r.id === id)
+  const repo = cfg.repos.find((r: any) => r.id === id)
   if (!repo) return
   if (script) { repo.script = script; saveConfig(cfg) }
   startServer(repo)
 }
 
 // ---------- port / server discovery ----------
-function scanListeningPorts() {
+function scanListeningPorts(): Promise<any[]> {
   return new Promise((resolve) => {
     exec('lsof -nP -iTCP -sTCP:LISTEN', { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      if (err || !stdout) return resolve([])
-      const byPort = new Map()
-      for (const line of stdout.split('\n')) {
-        const m = line.match(/:(\d+) \(LISTEN\)/)
-        if (!m) continue
-        const parts = line.trim().split(/\s+/)
-        const command = parts[0]
-        const pid = parseInt(parts[1], 10)
-        const port = parseInt(m[1], 10)
-        if (!byPort.has(port)) byPort.set(port, { port, pid, command })
-      }
-      resolve([...byPort.values()])
+      resolve(err || !stdout ? [] : parseLsofListen(stdout))
     })
   })
 }
 
-function pidCwd(pid) {
+function pidCwd(pid: number): Promise<string | null> {
   return new Promise((resolve) => {
     exec(`lsof -a -p ${pid} -d cwd -Fn`, (err, stdout) => {
       if (err || !stdout) return resolve(null)
@@ -228,17 +180,11 @@ function pidCwd(pid) {
 async function snapshot() {
   const cfg = loadConfig()
   const [ports, containers] = await Promise.all([scanListeningPorts(), dockerPs()])
-  // resolve cwd for each listening pid (best-effort)
-  await Promise.all(
-    ports.map(async (p) => { p.cwd = await pidCwd(p.pid) })
-  )
-  const isUnder = (child, parent) => child && parent && (child === parent || child.startsWith(parent.replace(/\/?$/, '/')))
+  await Promise.all(ports.map(async (p: any) => { p.cwd = await pidCwd(p.pid) }))
 
-  const repos = cfg.repos.map((r) => {
+  const repos = cfg.repos.map((r: any) => {
     const meta = repoMeta(r.path)
-    const isRunning = running.has(r.id)
-    // port match: a listening pid whose cwd is inside the repo
-    const match = ports.find((p) => isUnder(p.cwd, r.path))
+    const match = ports.find((p: any) => isUnder(p.cwd, r.path))
     return {
       ...r,
       pm: r.pm || meta.pm,
@@ -248,22 +194,14 @@ async function snapshot() {
       dockerfile: meta.dockerfile,
       framework: meta.framework,
       isBackend: meta.isBackend,
-      running: isRunning,
+      running: running.has(r.id),
       port: match ? match.port : null,
     }
   })
 
-  // discovered = listening dev-server ports not mapped to a configured repo.
-  // Match by dev runtime command only (port-range heuristics catch system noise
-  // like AirPlay/ControlCenter on 5000/7000).
-  const DEV_CMDS = /^(node|bun|deno|next|vite|nest|ng|webpack|esbuild|tsx|nodemon|python\d?|uvicorn|gunicorn|ruby|rails|puma|php|java|gradle|dotnet|air|go|rustc|cargo|turbo)/i
-  const repoPaths = cfg.repos.map((r) => r.path)
-  const dockerHostPorts = new Set(containers.flatMap((c) => c.ports))
-  const discovered = ports
-    .filter((p) => !repoPaths.some((rp) => isUnder(p.cwd, rp)))
-    .filter((p) => !/docker|vpnkit|backend|colima/i.test(p.command)) // shown under containers instead
-    .filter((p) => !dockerHostPorts.has(p.port)) // dedupe docker-published ports
-    .filter((p) => DEV_CMDS.test(p.command))
+  const repoPaths = cfg.repos.map((r: any) => r.path)
+  const dockerHostPorts = new Set<number>(containers.flatMap((c: any) => c.ports))
+  const discovered = filterDiscovered(ports, repoPaths, dockerHostPorts)
 
   return { repos, discovered, containers, dockerOk, postmanAvailable: POSTMAN_AVAILABLE }
 }
@@ -271,110 +209,71 @@ async function snapshot() {
 // ---------- cmux import ----------
 function importCmuxWorkspaces() {
   const ev = path.join(os.homedir(), '.cmuxterm', 'events.jsonl')
-  const out = new Map()
-  try {
-    const data = fs.readFileSync(ev, 'utf8')
-    for (const line of data.split('\n')) {
-      if (!line.includes('"workspace.selected"')) continue
-      try {
-        const o = JSON.parse(line)
-        const p = o.payload || {}
-        if (!p.cwd) continue
-        out.set(p.workspace_id || p.cwd, {
-          name: p.custom_title || p.title || path.basename(p.cwd),
-          path: p.cwd,
-        })
-      } catch {}
-    }
-  } catch {}
-  return [...out.values()]
+  try { return parseCmuxEvents(fs.readFileSync(ev, 'utf8'), path.basename) } catch { return [] }
 }
 
 // ---------- docker ----------
-async function dockerPs() {
+async function dockerPs(): Promise<any[]> {
   const { err, stdout } = await loginExec("docker ps --all --no-trunc --format '{{json .}}'")
   if (err) { dockerOk = false; return [] }
   dockerOk = true
-  const out = []
-  for (const line of stdout.split('\n')) {
-    if (!line.trim()) continue
-    try {
-      const c = JSON.parse(line)
-      const ports = [...new Set([...(c.Ports || '').matchAll(/:(\d+)->/g)].map((m) => parseInt(m[1], 10)))]
-      out.push({
-        id: c.ID,
-        name: (c.Names || '').split(',')[0],
-        image: c.Image,
-        state: c.State, // running | exited | created | paused
-        status: c.Status,
-        ports,
-      })
-    } catch {}
-  }
-  return out
+  return parseDockerPs(stdout)
 }
 
-async function dockerAction(id, action) {
-  // action: start | stop | restart
+async function dockerAction(id: string, action: string) {
   await loginExec(`docker ${action} ${id}`)
   refreshTray()
 }
 
-function dockerTailStart(cid) {
+function dockerTailStart(cid: string) {
   if (dockerTails.has(cid)) return
   const child = spawn(SHELL, ['-lc', `docker logs -f --tail 300 ${cid}`], { detached: true })
-  const entry = { child, logs: [] }
+  const entry: Task = { child, logs: [] }
   dockerTails.set(cid, entry)
-  const push = (d, stream) => {
+  const push = (d: any, stream: string) => {
     const text = d.toString()
     entry.logs.push({ stream, text })
     if (entry.logs.length > 3000) entry.logs.shift()
     emit('server:log', { id: 'docker:' + cid, stream, text })
   }
-  child.stdout.on('data', (d) => push(d, 'out'))
-  child.stderr.on('data', (d) => push(d, 'out')) // docker logs writes to stderr too; treat as normal
+  child.stdout.on('data', (d: any) => push(d, 'out'))
+  child.stderr.on('data', (d: any) => push(d, 'out'))
   child.on('exit', () => dockerTails.delete(cid))
 }
 
-function dockerTailStop(cid) {
+function dockerTailStop(cid: string) {
   const e = dockerTails.get(cid)
   if (!e) return
   try { process.kill(-e.child.pid, 'SIGTERM') } catch {}
   dockerTails.delete(cid)
 }
 
-function sanitizeName(s) {
-  const t = String(s).toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
-  return t || 'app'
-}
-
-function dockerTag(repo) { return `portboard/${sanitizeName(repo.name)}:latest` }
+function dockerTag(repo: any) { return `portboard/${sanitizeName(repo.name)}:latest` }
 
 // Run a shell script as a tracked "build task", streaming output under log id 'build:<repoId>'.
-function streamBuildTask(id, lines, cwd) {
+function streamBuildTask(id: string, lines: string[], cwd: string) {
   const key = 'build:' + id
   if (buildTasks.has(key)) return
   const child = spawn(SHELL, ['-lc', lines.join('\n')], { cwd, detached: true })
-  const entry = { child, logs: [] }
+  const entry: Task = { child, logs: [] }
   buildTasks.set(key, entry)
-  const push = (d, stream) => {
+  const push = (d: any, stream: string) => {
     const text = d.toString()
     entry.logs.push({ stream, text })
     if (entry.logs.length > 3000) entry.logs.shift()
     emit('server:log', { id: key, stream, text })
   }
-  child.stdout.on('data', (d) => push(d, 'out'))
-  child.stderr.on('data', (d) => push(d, 'err'))
-  child.on('exit', (code) => {
+  child.stdout.on('data', (d: any) => push(d, 'out'))
+  child.stderr.on('data', (d: any) => push(d, 'err'))
+  child.on('exit', (code: number) => {
     push(Buffer.from(`\n[portboard] exited (code ${code})\n`), code ? 'err' : 'out')
     setTimeout(() => buildTasks.delete(key), 60000)
     refreshTray()
   })
 }
 
-// Build the repo's Docker image only.
-function dockerBuild(id) {
-  const repo = loadConfig().repos.find((r) => r.id === id)
+function dockerBuild(id: string) {
+  const repo = loadConfig().repos.find((r: any) => r.id === id)
   if (!repo) return
   const tag = dockerTag(repo)
   streamBuildTask(id, [
@@ -385,10 +284,8 @@ function dockerBuild(id) {
   ], repo.path)
 }
 
-// Build if the image is missing, then (re)run the container with published ports.
-// The container then appears in the DOCKER section for management.
-function dockerRun(id) {
-  const repo = loadConfig().repos.find((r) => r.id === id)
+function dockerRun(id: string) {
+  const repo = loadConfig().repos.find((r: any) => r.id === id)
   if (!repo) return
   const tag = dockerTag(repo)
   const cname = `portboard-${sanitizeName(repo.name)}`
@@ -408,33 +305,30 @@ function dockerRun(id) {
 }
 
 // ---------- IPC ----------
-function rid() {
-  return 'r_' + Math.random().toString(36).slice(2, 10)
-}
+function rid() { return 'r_' + Math.random().toString(36).slice(2, 10) }
 
 ipcMain.handle('config:get', () => loadConfig())
 ipcMain.handle('snapshot', () => snapshot())
 
 ipcMain.handle('repo:add', async () => {
   dialogOpen = true
-  const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+  const res = await dialog.showOpenDialog(win as BrowserWindow, { properties: ['openDirectory'] })
   dialogOpen = false
   if (win && !win.isDestroyed()) win.focus()
   if (res.canceled || !res.filePaths[0]) return loadConfig()
   const p = res.filePaths[0]
   const cfg = loadConfig()
-  if (!cfg.repos.some((r) => r.path === p)) {
+  if (!cfg.repos.some((r: any) => r.path === p)) {
     cfg.repos.push({ id: rid(), name: path.basename(p), path: p })
     saveConfig(cfg)
   }
   return cfg
 })
 
-// Track existing local git repos: scan the picked folder (and its immediate children)
-// for .git directories and add each as a tracked repo.
-function findGitRepos(base) {
-  const isGit = (p) => { try { return fs.existsSync(path.join(p, '.git')) } catch { return false } }
-  const found = []
+// Track existing local git repos: scan the picked folder (and its immediate children).
+function findGitRepos(base: string): string[] {
+  const isGit = (p: string) => { try { return fs.existsSync(path.join(p, '.git')) } catch { return false } }
+  const found: string[] = []
   if (isGit(base)) found.push(base)
   try {
     for (const e of fs.readdirSync(base, { withFileTypes: true })) {
@@ -448,7 +342,7 @@ function findGitRepos(base) {
 
 ipcMain.handle('repo:addGit', async () => {
   dialogOpen = true
-  const res = await dialog.showOpenDialog(win, {
+  const res = await dialog.showOpenDialog(win as BrowserWindow, {
     properties: ['openDirectory'],
     message: 'Git 저장소(또는 저장소들이 들어있는 폴더)를 선택하세요',
   })
@@ -459,7 +353,7 @@ ipcMain.handle('repo:addGit', async () => {
   const cfg = loadConfig()
   let added = 0
   for (const p of repos) {
-    if (!cfg.repos.some((r) => r.path === p)) {
+    if (!cfg.repos.some((r: any) => r.path === p)) {
       cfg.repos.push({ id: rid(), name: path.basename(p), path: p })
       added++
     }
@@ -470,7 +364,7 @@ ipcMain.handle('repo:addGit', async () => {
 
 ipcMain.handle('repo:importCmux', () => {
   const cfg = loadConfig()
-  const existing = new Set(cfg.repos.map((r) => r.path))
+  const existing = new Set(cfg.repos.map((r: any) => r.path))
   for (const ws of importCmuxWorkspaces()) {
     if (!existing.has(ws.path)) {
       cfg.repos.push({ id: rid(), name: ws.name, path: ws.path })
@@ -484,7 +378,7 @@ ipcMain.handle('repo:importCmux', () => {
 ipcMain.handle('repo:remove', (_e, id) => {
   if (running.has(id)) stopServer(id)
   const cfg = loadConfig()
-  cfg.repos = cfg.repos.filter((r) => r.id !== id)
+  cfg.repos = cfg.repos.filter((r: any) => r.id !== id)
   saveConfig(cfg)
   return cfg
 })
@@ -494,15 +388,14 @@ ipcMain.handle('server:stop', (_e, id) => stopServer(id))
 ipcMain.handle('repo:dockerBuild', (_e, id) => dockerBuild(id))
 ipcMain.handle('repo:dockerRun', (_e, id) => dockerRun(id))
 ipcMain.handle('docker:openApp', () => {
-  // The Docker Desktop *dashboard* is a separate Electron app (com.electron.dockerdesktop);
-  // `open -a Docker` only activates the launcher and won't surface the window. Target the GUI
-  // app directly, falling back to the launcher.
+  // The Docker Desktop dashboard is a separate Electron app (com.electron.dockerdesktop);
+  // `open -a Docker` only activates the launcher. Target the GUI app, fall back to the launcher.
   exec('open -b com.electron.dockerdesktop', (err) => { if (err) exec('open -a Docker') })
   return true
 })
 ipcMain.handle('repo:setScript', (_e, id, script) => {
   const cfg = loadConfig()
-  const r = cfg.repos.find((x) => x.id === id)
+  const r = cfg.repos.find((x: any) => x.id === id)
   if (r) { r.script = script; saveConfig(cfg) }
   return true
 })
@@ -547,7 +440,6 @@ ipcMain.handle('postman:open', (_e, port) => {
 })
 
 // ---------- menu bar (Tray) ----------
-// Anchor the popover under the tray icon, clamped to the display.
 function positionUnderTray() {
   if (!win || !tray) return
   const tb = tray.getBounds()
@@ -555,7 +447,7 @@ function positionUnderTray() {
   const disp = screen.getDisplayNearestPoint({ x: tb.x, y: tb.y })
   const wa = disp.workArea
   let x = Math.round(tb.x + tb.width / 2 - wb.width / 2)
-  let y = Math.round(tb.y + tb.height + 4)
+  const y = Math.round(tb.y + tb.height + 4)
   x = Math.max(wa.x + 6, Math.min(x, wa.x + wa.width - wb.width - 6))
   win.setPosition(x, y, false)
 }
@@ -564,9 +456,9 @@ function showWindow() {
   if (!win || win.isDestroyed()) createWindow()
   if (!desktopMode) positionUnderTray()
   if (desktopMode && app.dock) app.dock.show()
-  win.show()
+  win!.show()
   app.focus({ steal: true })
-  win.focus()
+  win!.focus()
 }
 
 function toggleWindow() {
@@ -574,10 +466,9 @@ function toggleWindow() {
   else showWindow()
 }
 
-// Tray is just an icon + a live port count; clicking it opens the desktop app.
 async function refreshTray() {
   if (!tray) return
-  let repos = [], discovered = [], containers = []
+  let repos: any[] = [], discovered: any[] = [], containers: any[] = []
   try { ({ repos, discovered, containers } = await snapshot()) } catch {}
   let count = 0
   for (const r of repos) if (r.running && r.port) count++
@@ -592,12 +483,10 @@ function createTray() {
   icon.setTemplateImage(true)
   tray = new Tray(icon)
   tray.setToolTip('Portboard')
-  // Left click → open the app window (not a native dropdown).
   tray.on('click', () => toggleWindow())
   tray.on('double-click', () => showWindow())
-  // Right click → minimal menu (quit lives here).
   tray.on('right-click', () => {
-    tray.popUpContextMenu(Menu.buildFromTemplate([
+    tray!.popUpContextMenu(Menu.buildFromTemplate([
       { label: tm('open'), click: () => showWindow() },
       { type: 'separator' },
       { label: tm('quit'), click: () => app.quit() },
@@ -613,7 +502,7 @@ function createWindow() {
     height: 680,
     minWidth: 440,
     minHeight: 420,
-    frame: desktopMode,        // desktop mode = normal OS window with title bar
+    frame: desktopMode,
     resizable: true,
     movable: desktopMode,
     fullscreenable: false,
@@ -623,8 +512,6 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   })
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'))
-  // Popover mode: dismiss when it loses focus (unless a native dialog stole it).
-  // Desktop mode: behave like a normal window (no auto-hide).
   win.on('blur', () => { if (!dialogOpen && !desktopMode && win && !win.isDestroyed()) win.hide() })
   win.on('closed', () => { win = null })
 }
@@ -637,11 +524,10 @@ app.whenReady().then(() => {
   if (app.dock) { desktopMode ? app.dock.show() : app.dock.hide() }
   createTray()
   setInterval(refreshTray, 3000)
-  if (desktopMode) showWindow() // desktop users get the window on launch
+  if (desktopMode) showWindow()
   app.on('activate', () => showWindow())
 })
 
-// Keep the app (and its running servers) alive in the Dock even with no window.
 app.on('window-all-closed', () => {})
 
 app.on('before-quit', () => {
