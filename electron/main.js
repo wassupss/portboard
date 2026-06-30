@@ -451,10 +451,12 @@ function createTray() {
 // ---------- app lifecycle ----------
 function createWindow() {
   win = new BrowserWindow({
-    width: 440,
-    height: 580,
+    width: 580,
+    height: 680,
+    minWidth: 440,
+    minHeight: 420,
     frame: false,
-    resizable: false,
+    resizable: true,
     movable: false,
     fullscreenable: false,
     skipTaskbar: true,
