@@ -493,7 +493,12 @@ ipcMain.handle('server:start', (_e, id, script) => startRepoWithScript(id, scrip
 ipcMain.handle('server:stop', (_e, id) => stopServer(id))
 ipcMain.handle('repo:dockerBuild', (_e, id) => dockerBuild(id))
 ipcMain.handle('repo:dockerRun', (_e, id) => dockerRun(id))
-ipcMain.handle('docker:openApp', () => { exec('open -a Docker'); return true })
+ipcMain.handle('docker:openApp', () => {
+  // Open the Docker Desktop dashboard window (deep link is reliable even when Docker
+  // is already running in the menu bar); fall back to launching the app.
+  shell.openExternal('docker-desktop://dashboard').catch(() => exec('open -a Docker'))
+  return true
+})
 ipcMain.handle('repo:setScript', (_e, id, script) => {
   const cfg = loadConfig()
   const r = cfg.repos.find((x) => x.id === id)
