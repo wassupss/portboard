@@ -187,7 +187,11 @@ async function snapshot() {
 
   const repos = cfg.repos.map((r: any) => {
     const meta = repoMeta(r.path)
-    const match = ports.find((p: any) => isUnder(p.cwd, r.path))
+    // A listening pid whose cwd is inside the repo → its server is up (even if we didn't start it).
+    // Prefer the lowest matching port (the app port, not an ephemeral HMR/inspector port).
+    const matched = ports.filter((p: any) => isUnder(p.cwd, r.path)).sort((a: any, b: any) => a.port - b.port)
+    const match = matched[0]
+    const managed = running.has(r.id)
     return {
       ...r,
       pm: r.pm || meta.pm,
@@ -197,8 +201,10 @@ async function snapshot() {
       dockerfile: meta.dockerfile,
       framework: meta.framework,
       isBackend: meta.isBackend,
-      running: running.has(r.id),
+      managed,                       // started by Portboard (vs. detected externally)
+      running: managed || !!match,   // count externally-started dev servers as running
       port: match ? match.port : null,
+      pid: match ? match.pid : null, // for stopping an externally-started server
     }
   })
 

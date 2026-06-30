@@ -86,7 +86,8 @@ function repoRow(r: any): any {
 
   if (r.running) {
     const stop = el('button', 'danger small', t('stop'))
-    stop.onclick = () => window.api.stop(r.id)
+    // managed → kill our process tree; external (detected) → kill the listening pid.
+    stop.onclick = r.managed ? () => window.api.stop(r.id) : () => window.api.killPid(r.pid)
     controls.appendChild(stop)
   } else {
     const scripts: string[] = r.scripts || []
