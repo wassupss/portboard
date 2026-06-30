@@ -10,6 +10,7 @@
   --accent: #4493f8;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* beat element display rules (e.g. .logs flex) */
 html, body { margin: 0; height: 100%; }
 body {
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
