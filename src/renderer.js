@@ -3,7 +3,7 @@
 // ---------- i18n ----------
 const I18N = {
   ko: {
-    import: '가져오기 ▾', desktop: '데스크탑', menubar: '메뉴바',
+    menu: '메뉴 ▾', m_import: '가져오기', m_lang: '언어', toDesktop: '데스크탑 창으로', toMenubar: '메뉴바 팝오버로',
     src_cmux: 'cmux 워크스페이스', src_git: '로컬 Git 저장소…', src_folder: '폴더에서 추가…',
     g_running: '실행 중', g_listening: '리스닝 · 그 외 서버', g_docker: 'DOCKER', g_repos: '저장소',
     empty: '실행 중인 서버가 없습니다.<br>“가져오기”로 저장소를 추가하면 여기서 실행할 수 있어요.',
@@ -13,7 +13,7 @@ const I18N = {
     postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행', openDockerTip: 'Docker Desktop 열기',
   },
   en: {
-    import: 'Import ▾', desktop: 'Desktop', menubar: 'Menu bar',
+    menu: 'Menu ▾', m_import: 'Import', m_lang: 'Language', toDesktop: 'Desktop window', toMenubar: 'Menu-bar popover',
     src_cmux: 'cmux workspaces', src_git: 'Local git repos…', src_folder: 'Add a folder…',
     g_running: 'RUNNING', g_listening: 'LISTENING · others', g_docker: 'DOCKER', g_repos: 'REPOSITORIES',
     empty: 'No servers running.<br>Use “Import” to add a repository and run it here.',
@@ -172,6 +172,10 @@ async function refresh() {
   const runningRepos = repos.filter((r) => r.running)
   const stoppedRepos = repos.filter((r) => !r.running)
 
+  const runningCount = runningRepos.length + containers.filter((c) => c.state === 'running').length + discovered.length
+  brandCount.textContent = String(runningCount)
+  brandCount.hidden = runningCount === 0
+
   const section = (label, items, build) => {
     if (!items.length) return
     listEl.appendChild(el('div', 'group-label', label))
@@ -214,51 +218,51 @@ document.getElementById('log-close').onclick = () => {
   selectedId = null
 }
 
-// ---------- header / static i18n ----------
-const importBtn = document.getElementById('btn-import')
-const importMenu = document.getElementById('import-menu')
-const pinBtn = document.getElementById('btn-pin')
-const langBtn = document.getElementById('btn-lang')
+// ---------- header / unified menu ----------
+const menuBtn = document.getElementById('btn-menu')
+const appMenu = document.getElementById('app-menu')
 const dockerBtn = document.getElementById('btn-docker')
+const brandCount = document.getElementById('brand-count')
 const logCloseBtn = document.getElementById('log-close')
 
 function applyStaticI18n() {
-  importBtn.textContent = t('import')
-  langBtn.textContent = LANG === 'ko' ? 'EN' : '한'
+  menuBtn.textContent = t('menu')
   dockerBtn.title = t('openDockerTip')
   logCloseBtn.textContent = t('back')
-  importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
-    b.querySelector('.label').textContent = t('src_' + b.dataset.src)
-  })
-  updatePinLabel()
-}
-async function updatePinLabel() {
-  const d = await window.api.getDesktop()
-  pinBtn.textContent = d ? t('menubar') : t('desktop')
+  appMenu.querySelector('[data-i="m_import"]').textContent = t('m_import')
+  appMenu.querySelector('[data-i="m_lang"]').textContent = t('m_lang')
+  appMenu.querySelector('[data-act="import-cmux"] .label').textContent = t('src_cmux')
+  appMenu.querySelector('[data-act="import-git"] .label').textContent = t('src_git')
+  appMenu.querySelector('[data-act="import-folder"] .label').textContent = t('src_folder')
 }
 
-importBtn.onclick = (e) => { e.stopPropagation(); importMenu.hidden = !importMenu.hidden }
-document.addEventListener('click', () => { importMenu.hidden = true })
-importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
+async function populateMenu() {
+  const desktop = await window.api.getDesktop()
+  appMenu.querySelector('[data-act="lang-ko"] .ic').textContent = LANG === 'ko' ? '✓' : ''
+  appMenu.querySelector('[data-act="lang-en"] .ic').textContent = LANG === 'en' ? '✓' : ''
+  appMenu.querySelector('[data-act="view"] .label').textContent = desktop ? t('toMenubar') : t('toDesktop')
+}
+
+menuBtn.onclick = async (e) => {
+  e.stopPropagation()
+  if (appMenu.hidden) { await populateMenu(); appMenu.hidden = false } else appMenu.hidden = true
+}
+document.addEventListener('click', () => { appMenu.hidden = true })
+appMenu.querySelectorAll('.popmenu-item').forEach((b) => {
   b.onclick = async (e) => {
     e.stopPropagation()
-    importMenu.hidden = true
-    const src = b.dataset.src
-    if (src === 'cmux') await window.api.importCmux()
-    else if (src === 'folder') await window.api.addRepo()
-    else if (src === 'git') await window.api.addGit()
-    refresh()
+    appMenu.hidden = true
+    const act = b.dataset.act
+    if (act === 'import-cmux') { await window.api.importCmux(); refresh() }
+    else if (act === 'import-git') { await window.api.addGit(); refresh() }
+    else if (act === 'import-folder') { await window.api.addRepo(); refresh() }
+    else if (act === 'lang-ko' || act === 'lang-en') {
+      const l = act.slice(5)
+      if (l !== LANG) { LANG = l; await window.api.setLang(l); applyStaticI18n(); refresh() }
+    } else if (act === 'view') window.api.toggleDesktop() // window recreated → page reloads
   }
 })
-pinBtn.onclick = (e) => { e.stopPropagation(); window.api.toggleDesktop() } // window recreated → page reloads
 dockerBtn.onclick = (e) => { e.stopPropagation(); window.api.openDockerApp() }
-langBtn.onclick = async (e) => {
-  e.stopPropagation()
-  LANG = LANG === 'ko' ? 'en' : 'ko'
-  await window.api.setLang(LANG)
-  applyStaticI18n()
-  refresh()
-}
 
 window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })

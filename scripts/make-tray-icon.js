@@ -55,9 +55,9 @@ function render(S, fg, bg) {
 
 const outDir = path.join(__dirname, '..', 'electron', 'assets')
 fs.mkdirSync(outDir, { recursive: true })
-fs.writeFileSync(path.join(outDir, 'iconTemplate.png'), png(16, render(16)))
-fs.writeFileSync(path.join(outDir, 'iconTemplate@2x.png'), png(32, render(32)))
-console.log('wrote template 16 + 32')
+fs.writeFileSync(path.join(outDir, 'iconTemplate.png'), png(18, render(18)))
+fs.writeFileSync(path.join(outDir, 'iconTemplate@2x.png'), png(36, render(36)))
+console.log('wrote template 18 + 36')
 
 if (process.argv.includes('--preview')) {
   const fg = [28, 28, 32], bg = [228, 229, 233]
