@@ -54,9 +54,9 @@ function portBadge(port) {
 // card: [dot] [ body: line1 = name + path(ellipsis right) ; line2 = badges(left) + buttons(right) ]
 function makeCard(running, name, pathText) {
   const row = el('div', 'row card')
-  row.appendChild(el('span', 'dot' + (running ? ' on' : '')))
   const body = el('div', 'row-body')
   const line1 = el('div', 'row-line1')
+  line1.appendChild(el('span', 'dot' + (running ? ' on' : '')))
   line1.appendChild(el('span', 'name', name))
   if (pathText) line1.appendChild(el('span', 'path', pathText))
   const line2 = el('div', 'row-line2')
