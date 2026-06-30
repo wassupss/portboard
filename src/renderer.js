@@ -9,8 +9,8 @@ const I18N = {
     empty: '실행 중인 서버가 없습니다.<br>“가져오기”로 저장소를 추가하면 여기서 실행할 수 있어요.',
     run: '▶ 실행', stop: '정지', startC: '▶ 시작', restart: '재시작', logs: '로그', folder: '폴더', remove: '목록에서 제거',
     noScript: '실행할 스크립트 없음', open: '↗ 열기', kill: 'kill', back: '← 뒤로', logsTitle: '로그',
-    openBrowserTip: '브라우저로 열기', dockerRunTip: 'Dockerfile로 빌드 후 실행',
-    postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행',
+    openBrowserTip: '브라우저로 열기', dockerBuildTip: 'Docker 이미지 빌드', dockerRunTip: '빌드 후 컨테이너 실행',
+    postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행', openDockerTip: 'Docker Desktop 열기',
   },
   en: {
     import: 'Import ▾', desktop: 'Desktop', menubar: 'Menu bar',
@@ -19,8 +19,8 @@ const I18N = {
     empty: 'No servers running.<br>Use “Import” to add a repository and run it here.',
     run: '▶ Run', stop: 'Stop', startC: '▶ Start', restart: 'Restart', logs: 'Logs', folder: 'Folder', remove: 'Remove from list',
     noScript: 'No run script', open: '↗ Open', kill: 'kill', back: '← Back', logsTitle: 'Logs',
-    openBrowserTip: 'Open in browser', dockerRunTip: 'Build from Dockerfile and run',
-    postman: 'Postman', postmanTip: 'Copy URL and open Postman',
+    openBrowserTip: 'Open in browser', dockerBuildTip: 'Build Docker image', dockerRunTip: 'Build then run container',
+    postman: 'Postman', postmanTip: 'Copy URL and open Postman', openDockerTip: 'Open Docker Desktop',
   },
 }
 let LANG = 'ko'
@@ -50,24 +50,33 @@ function portBadge(port) {
   return b
 }
 
-// ---------- rows (2-row card: info on top, buttons below) ----------
+// ---------- rows ----------
+// card: [dot] [ body: line1 = name + path(ellipsis right) ; line2 = badges(left) + buttons(right) ]
+function makeCard(running, name, pathText) {
+  const row = el('div', 'row card')
+  row.appendChild(el('span', 'dot' + (running ? ' on' : '')))
+  const body = el('div', 'row-body')
+  const line1 = el('div', 'row-line1')
+  line1.appendChild(el('span', 'name', name))
+  if (pathText) line1.appendChild(el('span', 'path', pathText))
+  const line2 = el('div', 'row-line2')
+  const badges = el('div', 'badges')
+  const controls = el('div', 'controls')
+  line2.append(badges, controls)
+  body.append(line1, line2)
+  row.appendChild(body)
+  return { row, badges, controls }
+}
+
 function repoRow(r) {
   repoNames[r.id] = r.name
-  const row = el('div', 'row card')
+  const { row, badges, controls } = makeCard(r.running, r.name, r.path)
 
-  const top = el('div', 'row-top')
-  top.appendChild(el('span', 'dot' + (r.running ? ' on' : '')))
-  const meta = el('div', 'meta')
-  meta.appendChild(el('div', 'name', r.name))
-  meta.appendChild(el('div', 'sub', r.path))
-  top.appendChild(meta)
-  if (r.port) top.appendChild(portBadge(r.port))
-  if (r.framework) top.appendChild(el('span', 'badge fw', r.framework))
-  top.appendChild(el('span', 'badge', r.pm))
-  if (r.git) { const g = el('span', 'badge', 'git'); g.title = r.git; top.appendChild(g) }
-  row.appendChild(top)
+  if (r.port) badges.appendChild(portBadge(r.port))
+  if (r.framework) badges.appendChild(el('span', 'badge fw', r.framework))
+  badges.appendChild(el('span', 'badge', r.pm))
+  if (r.git) { const g = el('span', 'badge', 'git'); g.title = r.git; badges.appendChild(g) }
 
-  const controls = el('div', 'controls')
   if (r.running) {
     const stop = el('button', 'danger small', t('stop'))
     stop.onclick = () => window.api.stop(r.id)
@@ -91,10 +100,14 @@ function repoRow(r) {
     }
   }
   if (r.dockerfile) {
-    const d = el('button', 'ghost small', '🐳')
-    d.title = t('dockerRunTip')
-    d.onclick = () => { repoNames['build:' + r.id] = r.name + ' · docker'; window.api.dockerRun(r.id); openLogs('build:' + r.id) }
-    controls.appendChild(d)
+    const watch = () => { repoNames['build:' + r.id] = r.name + ' · docker'; openLogs('build:' + r.id) }
+    const build = el('button', 'ghost small', '🔨')
+    build.title = t('dockerBuildTip')
+    build.onclick = () => { window.api.dockerBuild(r.id); watch() }
+    const run = el('button', 'ghost small', '🐳')
+    run.title = t('dockerRunTip')
+    run.onclick = () => { window.api.dockerRun(r.id); watch() }
+    controls.append(build, run)
   }
   if (r.isBackend && postmanAvailable) {
     const p = el('button', 'ghost small', t('postman'))
@@ -113,24 +126,16 @@ function repoRow(r) {
   rm.onclick = async () => { await window.api.removeRepo(r.id); refresh() }
   controls.appendChild(rm)
 
-  row.appendChild(controls)
   return row
 }
 
 function containerRow(c) {
   repoNames['docker:' + c.id] = c.name
-  const row = el('div', 'row card')
-  const top = el('div', 'row-top')
-  top.appendChild(el('span', 'dot' + (c.state === 'running' ? ' on' : '')))
-  const meta = el('div', 'meta')
-  meta.appendChild(el('div', 'name', c.name))
-  meta.appendChild(el('div', 'sub', `${c.image} · ${c.status}`))
-  top.appendChild(meta)
-  c.ports.forEach((port) => top.appendChild(portBadge(port)))
-  top.appendChild(el('span', 'badge', 'docker'))
-  row.appendChild(top)
+  const { row, badges, controls } = makeCard(c.state === 'running', c.name, `${c.image} · ${c.status}`)
 
-  const controls = el('div', 'controls')
+  c.ports.forEach((port) => badges.appendChild(portBadge(port)))
+  badges.appendChild(el('span', 'badge', 'docker'))
+
   if (c.state === 'running') {
     const log = el('button', 'ghost small', t('logs'))
     log.onclick = () => openLogs('docker:' + c.id)
@@ -144,27 +149,17 @@ function containerRow(c) {
     start.onclick = () => window.api.dockerAction(c.id, 'start')
     controls.appendChild(start)
   }
-  row.appendChild(controls)
   return row
 }
 
 function discoveredRow(p) {
-  const row = el('div', 'row card')
-  const top = el('div', 'row-top')
-  top.appendChild(el('span', 'dot on'))
-  const meta = el('div', 'meta')
-  meta.appendChild(el('div', 'name', `:${p.port}`))
-  meta.appendChild(el('div', 'sub', `${p.command} · pid ${p.pid}${p.cwd ? ' · ' + p.cwd : ''}`))
-  top.appendChild(meta)
-  row.appendChild(top)
-
-  const controls = el('div', 'controls')
+  const { row, badges, controls } = makeCard(true, `:${p.port}`, `${p.command} · pid ${p.pid}${p.cwd ? ' · ' + p.cwd : ''}`)
+  badges.appendChild(el('span', 'badge', p.command))
   const open = el('button', 'ghost small', t('open'))
   open.onclick = () => window.api.openUrl(p.port)
   const kill = el('button', 'danger small', t('kill'))
   kill.onclick = () => window.api.killPid(p.pid)
   controls.append(open, kill)
-  row.appendChild(controls)
   return row
 }
 
@@ -224,11 +219,13 @@ const importBtn = document.getElementById('btn-import')
 const importMenu = document.getElementById('import-menu')
 const pinBtn = document.getElementById('btn-pin')
 const langBtn = document.getElementById('btn-lang')
+const dockerBtn = document.getElementById('btn-docker')
 const logCloseBtn = document.getElementById('log-close')
 
 function applyStaticI18n() {
   importBtn.textContent = t('import')
   langBtn.textContent = LANG === 'ko' ? 'EN' : '한'
+  dockerBtn.title = t('openDockerTip')
   logCloseBtn.textContent = t('back')
   importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
     b.querySelector('.label').textContent = t('src_' + b.dataset.src)
@@ -254,6 +251,7 @@ importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
   }
 })
 pinBtn.onclick = (e) => { e.stopPropagation(); window.api.toggleDesktop() } // window recreated → page reloads
+dockerBtn.onclick = (e) => { e.stopPropagation(); window.api.openDockerApp() }
 langBtn.onclick = async (e) => {
   e.stopPropagation()
   LANG = LANG === 'ko' ? 'en' : 'ko'

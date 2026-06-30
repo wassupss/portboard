@@ -99,26 +99,30 @@ main { flex: 1; display: flex; min-height: 0; position: relative; }
 }
 .group-label:first-child { margin-top: 4px; }
 
-/* card: info row on top, action buttons below */
+/* card: [dot · centered] [body: line1 name+path ; line2 badges(left) + buttons(right)] */
 .row {
-  display: flex; flex-direction: column; align-items: stretch; gap: 9px;
-  padding: 10px 11px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 6px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
 }
 .row:hover { background: var(--panel-2); }
-.row-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; flex: none; }
 .dot.on { background: var(--green); box-shadow: 0 0 7px rgba(63,185,80,.7); }
-.row .meta { min-width: 0; flex: 1; }
-.row .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.row-line1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.row-line1 .name { font-weight: 600; white-space: nowrap; flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
+.row-line1 .path { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.row-line2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+
 .badge {
   font-size: 11px; padding: 1px 7px; border-radius: 20px; flex: none;
   background: #33363c; color: var(--muted); border: 1px solid var(--border);
 }
 .badge.port { color: var(--accent); border-color: #2c4a73; }
 .badge.fw { color: #d2a8ff; border-color: #4a3a6b; background: #2c2540; }
-.row .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.controls { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 .script-select {
   font: 12px inherit;

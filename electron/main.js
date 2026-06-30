@@ -348,18 +348,51 @@ function sanitizeName(s) {
   return t || 'app'
 }
 
-// Build the repo's Docker image if missing, then (re)run the container with published ports.
-// Streams progress under the log id 'build:<repoId>'; the container then appears in DOCKER.
-function dockerRun(id) {
-  const cfg = loadConfig()
-  const repo = cfg.repos.find((r) => r.id === id)
-  if (!repo) return
+function dockerTag(repo) { return `portboard/${sanitizeName(repo.name)}:latest` }
+
+// Run a shell script as a tracked "build task", streaming output under log id 'build:<repoId>'.
+function streamBuildTask(id, lines, cwd) {
   const key = 'build:' + id
   if (buildTasks.has(key)) return
-  const base = sanitizeName(repo.name)
-  const tag = `portboard/${base}:latest`
-  const cname = `portboard-${base}`
-  const script = [
+  const child = spawn(SHELL, ['-lc', lines.join('\n')], { cwd, detached: true })
+  const entry = { child, logs: [] }
+  buildTasks.set(key, entry)
+  const push = (d, stream) => {
+    const text = d.toString()
+    entry.logs.push({ stream, text })
+    if (entry.logs.length > 3000) entry.logs.shift()
+    emit('server:log', { id: key, stream, text })
+  }
+  child.stdout.on('data', (d) => push(d, 'out'))
+  child.stderr.on('data', (d) => push(d, 'err'))
+  child.on('exit', (code) => {
+    push(Buffer.from(`\n[portboard] exited (code ${code})\n`), code ? 'err' : 'out')
+    setTimeout(() => buildTasks.delete(key), 60000)
+    refreshTray()
+  })
+}
+
+// Build the repo's Docker image only.
+function dockerBuild(id) {
+  const repo = loadConfig().repos.find((r) => r.id === id)
+  if (!repo) return
+  const tag = dockerTag(repo)
+  streamBuildTask(id, [
+    'set -e',
+    `echo "[portboard] $ docker build -t ${tag} ."`,
+    `docker build -t ${tag} ${JSON.stringify(repo.path)}`,
+    'echo "[portboard] build done."',
+  ], repo.path)
+}
+
+// Build if the image is missing, then (re)run the container with published ports.
+// The container then appears in the DOCKER section for management.
+function dockerRun(id) {
+  const repo = loadConfig().repos.find((r) => r.id === id)
+  if (!repo) return
+  const tag = dockerTag(repo)
+  const cname = `portboard-${sanitizeName(repo.name)}`
+  streamBuildTask(id, [
     'set -e',
     `if ! docker image inspect ${tag} >/dev/null 2>&1; then`,
     `  echo "[portboard] building image ${tag} …"`,
@@ -371,25 +404,7 @@ function dockerRun(id) {
     `echo "[portboard] starting container ${cname} …"`,
     `docker run -d -P --name ${cname} ${tag}`,
     'echo "[portboard] done — see DOCKER section."',
-  ].join('\n')
-
-  const child = spawn(SHELL, ['-lc', script], { cwd: repo.path, detached: true })
-  const entry = { child, logs: [] }
-  buildTasks.set(key, entry)
-  const push = (d, stream) => {
-    const text = d.toString()
-    entry.logs.push({ stream, text })
-    if (entry.logs.length > 3000) entry.logs.shift()
-    emit('server:log', { id: key, stream, text })
-  }
-  push(Buffer.from(`[portboard] $ docker build/run for ${repo.name}\n`), 'out')
-  child.stdout.on('data', (d) => push(d, 'out'))
-  child.stderr.on('data', (d) => push(d, 'err'))
-  child.on('exit', (code) => {
-    push(Buffer.from(`\n[portboard] exited (code ${code})\n`), code ? 'err' : 'out')
-    setTimeout(() => buildTasks.delete(key), 60000)
-    refreshTray()
-  })
+  ], repo.path)
 }
 
 // ---------- IPC ----------
@@ -476,7 +491,9 @@ ipcMain.handle('repo:remove', (_e, id) => {
 
 ipcMain.handle('server:start', (_e, id, script) => startRepoWithScript(id, script))
 ipcMain.handle('server:stop', (_e, id) => stopServer(id))
+ipcMain.handle('repo:dockerBuild', (_e, id) => dockerBuild(id))
 ipcMain.handle('repo:dockerRun', (_e, id) => dockerRun(id))
+ipcMain.handle('docker:openApp', () => { exec('open -a Docker'); return true })
 ipcMain.handle('repo:setScript', (_e, id, script) => {
   const cfg = loadConfig()
   const r = cfg.repos.find((x) => x.id === id)

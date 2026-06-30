@@ -13,7 +13,9 @@ contextBridge.exposeInMainWorld('api', {
 
   start: (id, script) => ipcRenderer.invoke('server:start', id, script),
   stop: (id) => ipcRenderer.invoke('server:stop', id),
+  dockerBuild: (id) => ipcRenderer.invoke('repo:dockerBuild', id),
   dockerRun: (id) => ipcRenderer.invoke('repo:dockerRun', id),
+  openDockerApp: () => ipcRenderer.invoke('docker:openApp'),
   setScript: (id, script) => ipcRenderer.invoke('repo:setScript', id, script),
   logs: (id) => ipcRenderer.invoke('server:logs', id),
 
