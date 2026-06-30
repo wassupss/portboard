@@ -48,9 +48,7 @@ function repoRow(r) {
     controls.appendChild(stop)
   } else {
     const scripts = r.scripts || []
-    const preferred = ['dev', 'start', 'serve', 'preview', 'storybook', 'watch']
-    let opts = preferred.filter((s) => scripts.includes(s))
-    if (!opts.length) opts = scripts
+    const opts = ['dev', 'start'].filter((s) => scripts.includes(s))
     if (opts.length) {
       const sel = el('select', 'script-select')
       opts.forEach((s) => { const o = el('option', null, s); o.value = s; sel.appendChild(o) })
@@ -65,6 +63,12 @@ function repoRow(r) {
       start.title = '실행할 스크립트가 없음'
       controls.appendChild(start)
     }
+  }
+  if (r.dockerfile) {
+    const d = el('button', 'ghost small', '🐳')
+    d.title = 'Dockerfile로 빌드 후 실행'
+    d.onclick = () => { repoNames['build:' + r.id] = r.name + ' · docker'; window.api.dockerRun(r.id); openLogs('build:' + r.id) }
+    controls.appendChild(d)
   }
   const logBtn = el('button', 'ghost small', '로그')
   logBtn.onclick = () => openLogs(r.id)
@@ -209,6 +213,15 @@ importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
     refresh()
   }
 })
+
+// desktop / popover mode toggle
+const pinBtn = document.getElementById('btn-pin')
+;(async () => {
+  const d = await window.api.getDesktop()
+  pinBtn.textContent = d ? '메뉴바' : '데스크탑'
+  pinBtn.title = d ? '메뉴바 팝오버로 전환' : '데스크탑 창으로 고정'
+})()
+pinBtn.onclick = (e) => { e.stopPropagation(); window.api.toggleDesktop() } // window is recreated, page reloads
 
 window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })

@@ -13,8 +13,12 @@ contextBridge.exposeInMainWorld('api', {
 
   start: (id, script) => ipcRenderer.invoke('server:start', id, script),
   stop: (id) => ipcRenderer.invoke('server:stop', id),
+  dockerRun: (id) => ipcRenderer.invoke('repo:dockerRun', id),
   setScript: (id, script) => ipcRenderer.invoke('repo:setScript', id, script),
   logs: (id) => ipcRenderer.invoke('server:logs', id),
+
+  toggleDesktop: () => ipcRenderer.invoke('window:toggleDesktop'),
+  getDesktop: () => ipcRenderer.invoke('window:getDesktop'),
 
   openUrl: (port) => ipcRenderer.invoke('open:url', port),
   openPath: (p) => ipcRenderer.invoke('open:path', p),

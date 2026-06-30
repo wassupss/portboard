@@ -11,10 +11,12 @@ const CONFIG_PATH = path.join(app.getPath('userData'), 'devdock.json')
 // id -> { child, logs: [{stream,text}], pm, startedAt }
 const running = new Map()
 const dockerTails = new Map() // containerId -> { child, logs: [] }
+const buildTasks = new Map()  // 'build:<repoId>' -> { child, logs: [] }
 let win = null
 let tray = null
 let dockerOk = false
 let dialogOpen = false // suppress popover blur-hide while a native dialog is open
+let desktopMode = false // false = menu-bar popover, true = normal desktop window
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 // Run a command through a login shell so PATH (docker, pnpm, node shims) resolves like Terminal.
@@ -68,7 +70,9 @@ function repoMeta(repoPath) {
     const m = conf.match(/url\s*=\s*(.+)/)
     if (m) git = m[1].trim()
   } catch {}
-  return { pm: detectPm(repoPath), hasStart, scripts, git }
+  let dockerfile = false
+  try { dockerfile = fs.existsSync(path.join(repoPath, 'Dockerfile')) } catch {}
+  return { pm: detectPm(repoPath), hasStart, scripts, git, dockerfile }
 }
 
 // ---------- process management ----------
@@ -76,13 +80,22 @@ function emit(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
 }
 
+// Common build-output dirs; if present we assume `start` doesn't need a fresh build.
+function hasBuildOutput(repoPath) {
+  return ['dist', 'build', '.next', '.output', '.svelte-kit', 'out', '.nuxt'].some((d) => {
+    try { return fs.existsSync(path.join(repoPath, d)) } catch { return false }
+  })
+}
+
 function startServer(repo) {
   if (running.has(repo.id)) return
   const meta = repoMeta(repo.path)
   const pm = repo.pm || meta.pm
-  const script = repo.script || (meta.scripts.includes('start') ? 'start' : 'dev')
+  const script = repo.script || (meta.scripts.includes('dev') ? 'dev' : 'start')
   const shellPath = process.env.SHELL || '/bin/zsh'
-  const cmd = `${pm} run ${script}`
+  // `start` needs built output — build first when a build script exists but no output is present.
+  const prefixBuild = script === 'start' && meta.scripts.includes('build') && !hasBuildOutput(repo.path)
+  const cmd = prefixBuild ? `${pm} run build && ${pm} run ${script}` : `${pm} run ${script}`
 
   // Login shell so PATH/version-manager shims (pnpm, yarn, node) resolve like a Terminal.
   // detached:true puts the child in its own process group so we can kill the whole tree.
@@ -101,6 +114,7 @@ function startServer(repo) {
     if (entry.logs.length > 3000) entry.logs.shift()
     emit('server:log', { id: repo.id, stream, text })
   }
+  push(Buffer.from(`[portboard] $ ${cmd}\n`), 'out')
   child.stdout.on('data', (d) => push(d, 'out'))
   child.stderr.on('data', (d) => push(d, 'err'))
   child.on('exit', (code, signal) => {
@@ -109,10 +123,10 @@ function startServer(repo) {
     refreshTray()
   })
   child.on('error', (err) => {
-    push(Buffer.from(`\n[devdock] failed to start: ${err.message}\n`), 'err')
+    push(Buffer.from(`\n[portboard] failed to start: ${err.message}\n`), 'err')
   })
 
-  emit('server:started', { id: repo.id, cmd: `${pm} run ${script}` })
+  emit('server:started', { id: repo.id, cmd })
   refreshTray()
 }
 
@@ -126,11 +140,9 @@ function stopServer(id) {
   }, 4000)
 }
 
-// Scripts worth offering as "run" targets (dev servers etc.), else fall back to all.
+// Only dev / start are offered as run targets.
 function runnableScripts(scripts = []) {
-  const preferred = ['dev', 'start', 'serve', 'preview', 'storybook', 'watch']
-  const hit = preferred.filter((s) => scripts.includes(s))
-  return hit.length ? hit : scripts
+  return ['dev', 'start'].filter((s) => scripts.includes(s))
 }
 
 function startRepoWithScript(id, script) {
@@ -191,6 +203,7 @@ async function snapshot() {
       hasStart: meta.hasStart,
       scripts: meta.scripts,
       git: meta.git,
+      dockerfile: meta.dockerfile,
       running: isRunning,
       port: match ? match.port : null,
     }
@@ -286,6 +299,55 @@ function dockerTailStop(cid) {
   dockerTails.delete(cid)
 }
 
+function sanitizeName(s) {
+  const t = String(s).toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
+  return t || 'app'
+}
+
+// Build the repo's Docker image if missing, then (re)run the container with published ports.
+// Streams progress under the log id 'build:<repoId>'; the container then appears in DOCKER.
+function dockerRun(id) {
+  const cfg = loadConfig()
+  const repo = cfg.repos.find((r) => r.id === id)
+  if (!repo) return
+  const key = 'build:' + id
+  if (buildTasks.has(key)) return
+  const base = sanitizeName(repo.name)
+  const tag = `portboard/${base}:latest`
+  const cname = `portboard-${base}`
+  const script = [
+    'set -e',
+    `if ! docker image inspect ${tag} >/dev/null 2>&1; then`,
+    `  echo "[portboard] building image ${tag} …"`,
+    `  docker build -t ${tag} ${JSON.stringify(repo.path)}`,
+    'else',
+    `  echo "[portboard] image ${tag} exists — skipping build"`,
+    'fi',
+    `docker rm -f ${cname} >/dev/null 2>&1 || true`,
+    `echo "[portboard] starting container ${cname} …"`,
+    `docker run -d -P --name ${cname} ${tag}`,
+    'echo "[portboard] done — see DOCKER section."',
+  ].join('\n')
+
+  const child = spawn(SHELL, ['-lc', script], { cwd: repo.path, detached: true })
+  const entry = { child, logs: [] }
+  buildTasks.set(key, entry)
+  const push = (d, stream) => {
+    const text = d.toString()
+    entry.logs.push({ stream, text })
+    if (entry.logs.length > 3000) entry.logs.shift()
+    emit('server:log', { id: key, stream, text })
+  }
+  push(Buffer.from(`[portboard] $ docker build/run for ${repo.name}\n`), 'out')
+  child.stdout.on('data', (d) => push(d, 'out'))
+  child.stderr.on('data', (d) => push(d, 'err'))
+  child.on('exit', (code) => {
+    push(Buffer.from(`\n[portboard] exited (code ${code})\n`), code ? 'err' : 'out')
+    setTimeout(() => buildTasks.delete(key), 60000)
+    refreshTray()
+  })
+}
+
 // ---------- IPC ----------
 function rid() {
   return 'r_' + Math.random().toString(36).slice(2, 10)
@@ -370,6 +432,7 @@ ipcMain.handle('repo:remove', (_e, id) => {
 
 ipcMain.handle('server:start', (_e, id, script) => startRepoWithScript(id, script))
 ipcMain.handle('server:stop', (_e, id) => stopServer(id))
+ipcMain.handle('repo:dockerRun', (_e, id) => dockerRun(id))
 ipcMain.handle('repo:setScript', (_e, id, script) => {
   const cfg = loadConfig()
   const r = cfg.repos.find((x) => x.id === id)
@@ -377,9 +440,22 @@ ipcMain.handle('repo:setScript', (_e, id, script) => {
   return true
 })
 ipcMain.handle('server:logs', (_e, id) => {
-  if (typeof id === 'string' && id.startsWith('docker:')) return dockerTails.get(id.slice(7))?.logs || []
+  if (typeof id === 'string') {
+    if (id.startsWith('docker:')) return dockerTails.get(id.slice(7))?.logs || []
+    if (id.startsWith('build:')) return buildTasks.get(id)?.logs || []
+  }
   return running.get(id)?.logs || []
 })
+
+ipcMain.handle('window:toggleDesktop', () => {
+  desktopMode = !desktopMode
+  const cfg = loadConfig(); cfg.desktopMode = desktopMode; saveConfig(cfg)
+  if (win && !win.isDestroyed()) { win.destroy(); win = null }
+  if (app.dock) { desktopMode ? app.dock.show() : app.dock.hide() }
+  showWindow()
+  return desktopMode
+})
+ipcMain.handle('window:getDesktop', () => desktopMode)
 
 ipcMain.handle('docker:action', (_e, id, action) => dockerAction(id, action))
 ipcMain.handle('docker:tail', (_e, cid) => dockerTailStart(cid))
@@ -405,7 +481,8 @@ function positionUnderTray() {
 
 function showWindow() {
   if (!win || win.isDestroyed()) createWindow()
-  positionUnderTray()
+  if (!desktopMode) positionUnderTray()
+  if (desktopMode && app.dock) app.dock.show()
   win.show()
   app.focus({ steal: true })
   win.focus()
@@ -426,23 +503,23 @@ async function refreshTray() {
   for (const c of containers) if (c.state === 'running') count += c.ports.length
   count += discovered.length
   tray.setTitle(count ? ` ${count}` : '')
-  tray.setToolTip(count ? `DevDock — ${count}개 포트 열림` : 'DevDock')
+  tray.setToolTip(count ? `Portboard — ${count}개 포트 열림` : 'Portboard')
 }
 
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'iconTemplate.png'))
   icon.setTemplateImage(true)
   tray = new Tray(icon)
-  tray.setToolTip('DevDock')
-  // Left click → open the desktop app window (not a native dropdown).
+  tray.setToolTip('Portboard')
+  // Left click → open the app window (not a native dropdown).
   tray.on('click', () => toggleWindow())
   tray.on('double-click', () => showWindow())
   // Right click → minimal menu (quit lives here).
   tray.on('right-click', () => {
     tray.popUpContextMenu(Menu.buildFromTemplate([
-      { label: '대시보드 열기', click: () => showWindow() },
+      { label: '열기', click: () => showWindow() },
       { type: 'separator' },
-      { label: 'DevDock 종료', click: () => app.quit() },
+      { label: 'Portboard 종료', click: () => app.quit() },
     ]))
   })
   refreshTray()
@@ -455,26 +532,29 @@ function createWindow() {
     height: 680,
     minWidth: 440,
     minHeight: 420,
-    frame: false,
+    frame: desktopMode,        // desktop mode = normal OS window with title bar
     resizable: true,
-    movable: false,
+    movable: desktopMode,
     fullscreenable: false,
-    skipTaskbar: true,
+    skipTaskbar: !desktopMode,
     show: false,
     title: 'Portboard',
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   })
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'))
-  // Popover behavior: dismiss when it loses focus (unless a native dialog stole it).
-  win.on('blur', () => { if (!dialogOpen && win && !win.isDestroyed()) win.hide() })
+  // Popover mode: dismiss when it loses focus (unless a native dialog stole it).
+  // Desktop mode: behave like a normal window (no auto-hide).
+  win.on('blur', () => { if (!dialogOpen && !desktopMode && win && !win.isDestroyed()) win.hide() })
   win.on('closed', () => { win = null })
 }
 
 app.whenReady().then(() => {
   app.setName('Portboard')
-  if (app.dock) app.dock.hide() // menu-bar app: no Dock icon
+  desktopMode = !!loadConfig().desktopMode
+  if (app.dock) { desktopMode ? app.dock.show() : app.dock.hide() }
   createTray()
   setInterval(refreshTray, 3000)
+  if (desktopMode) showWindow() // desktop users get the window on launch
   app.on('activate', () => showWindow())
 })
 
@@ -484,4 +564,5 @@ app.on('window-all-closed', () => {})
 app.on('before-quit', () => {
   for (const id of running.keys()) stopServer(id)
   for (const cid of dockerTails.keys()) dockerTailStop(cid)
+  for (const e of buildTasks.values()) { try { process.kill(-e.child.pid, 'SIGTERM') } catch {} }
 })
