@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
 
   toggleDesktop: () => ipcRenderer.invoke('window:toggleDesktop'),
   getDesktop: () => ipcRenderer.invoke('window:getDesktop'),
+  setLang: (l) => ipcRenderer.invoke('lang:set', l),
+  openPostman: (port) => ipcRenderer.invoke('postman:open', port),
 
   openUrl: (port) => ipcRenderer.invoke('open:url', port),
   openPath: (p) => ipcRenderer.invoke('open:path', p),

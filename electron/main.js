@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -17,6 +17,10 @@ let tray = null
 let dockerOk = false
 let dialogOpen = false // suppress popover blur-hide while a native dialog is open
 let desktopMode = false // false = menu-bar popover, true = normal desktop window
+
+const POSTMAN_AVAILABLE = (() => {
+  try { return fs.existsSync('/Applications/Postman.app') || fs.existsSync(path.join(os.homedir(), 'Applications/Postman.app')) } catch { return false }
+})()
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 // Run a command through a login shell so PATH (docker, pnpm, node shims) resolves like Terminal.
@@ -41,6 +45,14 @@ function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
 }
 
+// ---------- i18n (tray / menus) ----------
+function lang() { return loadConfig().lang === 'en' ? 'en' : 'ko' }
+const TRAY_I18N = {
+  ko: { open: '열기', quit: 'Portboard 종료', ports: (n) => `Portboard — ${n}개 포트 열림`, idle: 'Portboard' },
+  en: { open: 'Open', quit: 'Quit Portboard', ports: (n) => `Portboard — ${n} ports open`, idle: 'Portboard' },
+}
+function tm(k, ...a) { const d = TRAY_I18N[lang()][k]; return typeof d === 'function' ? d(...a) : d }
+
 // ---------- package manager detection ----------
 function detectPm(repoPath) {
   const has = (f) => fs.existsSync(path.join(repoPath, f))
@@ -56,13 +68,43 @@ function detectPm(repoPath) {
   if (has('package-lock.json')) return 'npm'
   return 'npm'
 }
+// Identify the framework (and whether it's a backend/API server) from package.json deps.
+function detectFramework(deps) {
+  const has = (n) => n in deps
+  const backend = ['@nestjs/core', 'express', 'fastify', 'koa', '@hapi/hapi', 'restify', 'hono', '@adonisjs/core']
+  const isBackend = backend.some(has)
+  let framework = null
+  if (has('next')) framework = 'Next.js'
+  else if (has('nuxt')) framework = 'Nuxt'
+  else if (has('@remix-run/react') || has('@remix-run/node')) framework = 'Remix'
+  else if (has('astro')) framework = 'Astro'
+  else if (has('@sveltejs/kit')) framework = 'SvelteKit'
+  else if (has('@angular/core')) framework = 'Angular'
+  else if (has('gatsby')) framework = 'Gatsby'
+  else if (has('@nestjs/core')) framework = 'NestJS'
+  else if (has('express')) framework = 'Express'
+  else if (has('fastify')) framework = 'Fastify'
+  else if (has('koa')) framework = 'Koa'
+  else if (has('@hapi/hapi')) framework = 'Hapi'
+  else if (has('hono')) framework = 'Hono'
+  else if (has('vite')) framework = has('vue') ? 'Vue + Vite' : has('react') ? 'React + Vite' : has('svelte') ? 'Svelte + Vite' : 'Vite'
+  else if (has('react')) framework = 'React'
+  else if (has('vue')) framework = 'Vue'
+  else if (has('svelte')) framework = 'Svelte'
+  return { framework, isBackend }
+}
+
 function repoMeta(repoPath) {
   let hasStart = false
   let scripts = []
+  let framework = null
+  let isBackend = false
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoPath, 'package.json'), 'utf8'))
     scripts = Object.keys(pkg.scripts || {})
     hasStart = scripts.includes('start') || scripts.includes('dev')
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }
+    ;({ framework, isBackend } = detectFramework(deps))
   } catch {}
   let git = null
   try {
@@ -72,7 +114,7 @@ function repoMeta(repoPath) {
   } catch {}
   let dockerfile = false
   try { dockerfile = fs.existsSync(path.join(repoPath, 'Dockerfile')) } catch {}
-  return { pm: detectPm(repoPath), hasStart, scripts, git, dockerfile }
+  return { pm: detectPm(repoPath), hasStart, scripts, git, dockerfile, framework, isBackend }
 }
 
 // ---------- process management ----------
@@ -204,6 +246,8 @@ async function snapshot() {
       scripts: meta.scripts,
       git: meta.git,
       dockerfile: meta.dockerfile,
+      framework: meta.framework,
+      isBackend: meta.isBackend,
       running: isRunning,
       port: match ? match.port : null,
     }
@@ -221,7 +265,7 @@ async function snapshot() {
     .filter((p) => !dockerHostPorts.has(p.port)) // dedupe docker-published ports
     .filter((p) => DEV_CMDS.test(p.command))
 
-  return { repos, discovered, containers, dockerOk }
+  return { repos, discovered, containers, dockerOk, postmanAvailable: POSTMAN_AVAILABLE }
 }
 
 // ---------- cmux import ----------
@@ -465,6 +509,20 @@ ipcMain.handle('open:url', (_e, port) => shell.openExternal(`http://localhost:${
 ipcMain.handle('open:path', (_e, p) => shell.openPath(p))
 ipcMain.handle('proc:kill', (_e, pid) => { try { process.kill(pid, 'SIGTERM') } catch {} })
 
+ipcMain.handle('lang:set', (_e, l) => {
+  const cfg = loadConfig(); cfg.lang = l === 'en' ? 'en' : 'ko'; saveConfig(cfg)
+  refreshTray()
+  return cfg.lang
+})
+
+// Open Postman against a running API server: copy the localhost URL to the clipboard
+// (Postman has no create-request deep link) and bring Postman to the front.
+ipcMain.handle('postman:open', (_e, port) => {
+  if (port) { try { clipboard.writeText(`http://localhost:${port}`) } catch {} }
+  exec('open -a Postman')
+  return true
+})
+
 // ---------- menu bar (Tray) ----------
 // Anchor the popover under the tray icon, clamped to the display.
 function positionUnderTray() {
@@ -503,7 +561,7 @@ async function refreshTray() {
   for (const c of containers) if (c.state === 'running') count += c.ports.length
   count += discovered.length
   tray.setTitle(count ? ` ${count}` : '')
-  tray.setToolTip(count ? `Portboard — ${count}개 포트 열림` : 'Portboard')
+  tray.setToolTip(count ? tm('ports', count) : tm('idle'))
 }
 
 function createTray() {
@@ -517,9 +575,9 @@ function createTray() {
   // Right click → minimal menu (quit lives here).
   tray.on('right-click', () => {
     tray.popUpContextMenu(Menu.buildFromTemplate([
-      { label: '열기', click: () => showWindow() },
+      { label: tm('open'), click: () => showWindow() },
       { type: 'separator' },
-      { label: 'Portboard 종료', click: () => app.quit() },
+      { label: tm('quit'), click: () => app.quit() },
     ]))
   })
   refreshTray()
@@ -550,7 +608,9 @@ function createWindow() {
 
 app.whenReady().then(() => {
   app.setName('Portboard')
-  desktopMode = !!loadConfig().desktopMode
+  const cfg0 = loadConfig()
+  if (!cfg0.lang) { cfg0.lang = app.getLocale().toLowerCase().startsWith('ko') ? 'ko' : 'en'; saveConfig(cfg0) }
+  desktopMode = !!cfg0.desktopMode
   if (app.dock) { desktopMode ? app.dock.show() : app.dock.hide() }
   createTray()
   setInterval(refreshTray, 3000)

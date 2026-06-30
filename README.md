@@ -1,22 +1,30 @@
 # Portboard
 
+**English** | [한국어](README.ko.md)
+
 A macOS **menu-bar** dashboard for your local development. See every running dev server and
-Docker container by port, and start/stop them — all from a popover that drops down under the
-menu-bar icon.
+Docker container by port, start/stop them, and open a backend in Postman — all from a popover
+that drops down under the menu-bar icon. Also runs as a normal desktop window. UI in English and
+Korean.
 
 ![platform](https://img.shields.io/badge/platform-macOS-black)
 
 ## Features
 
 - **Menu-bar app** — a server+check icon with a live count of open ports. Click it and the app
-  drops down right under the icon (no Dock icon, no native menu).
+  drops down right under the icon (or switch to a normal **desktop window**).
 - **Ports at a glance** — managed repos, Docker containers, and other listening dev ports, each
   with its port; click to open in the browser.
-- **Run any script** — start a repo with `dev`, `start`, `serve`, … (auto-detects pnpm/npm/yarn),
-  streams logs, stops the whole process tree.
-- **Docker** — lists containers via `docker ps` (real names + ports), start / stop / restart,
-  live `docker logs`.
-- **Import** — pull repos from **cmux** workspaces, **clone from GitHub**, or **add a folder**.
+- **Framework detection** — shows Next.js / Nuxt / Remix / Vite / NestJS / Express … from
+  `package.json`.
+- **Run dev / start** — auto-detects pnpm/npm/yarn; `start` builds first when there's a build
+  script but no build output; streams logs and stops the whole process tree.
+- **Docker** — lists containers via `docker ps` (names + ports), start / stop / restart, live
+  `docker logs`. Repos with a `Dockerfile` can build + run in one click.
+- **Postman** — backend/API repos get a Postman button that copies the `localhost` URL and opens
+  Postman.
+- **Import** — pull repos from **cmux** workspaces, scan **local git repos**, or **add a folder**.
+- **Bilingual** — English / Korean, toggled in the header (defaults to your system locale).
 
 ## How it works
 

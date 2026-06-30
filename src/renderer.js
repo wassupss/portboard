@@ -1,12 +1,40 @@
 'use strict'
 
+// ---------- i18n ----------
+const I18N = {
+  ko: {
+    import: '가져오기 ▾', desktop: '데스크탑', menubar: '메뉴바',
+    src_cmux: 'cmux 워크스페이스', src_git: '로컬 Git 저장소…', src_folder: '폴더에서 추가…',
+    g_running: '실행 중', g_listening: '리스닝 · 그 외 서버', g_docker: 'DOCKER', g_repos: '저장소',
+    empty: '실행 중인 서버가 없습니다.<br>“가져오기”로 저장소를 추가하면 여기서 실행할 수 있어요.',
+    run: '▶ 실행', stop: '정지', startC: '▶ 시작', restart: '재시작', logs: '로그', folder: '폴더', remove: '목록에서 제거',
+    noScript: '실행할 스크립트 없음', open: '↗ 열기', kill: 'kill', back: '← 뒤로', logsTitle: '로그',
+    openBrowserTip: '브라우저로 열기', dockerRunTip: 'Dockerfile로 빌드 후 실행',
+    postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행',
+  },
+  en: {
+    import: 'Import ▾', desktop: 'Desktop', menubar: 'Menu bar',
+    src_cmux: 'cmux workspaces', src_git: 'Local git repos…', src_folder: 'Add a folder…',
+    g_running: 'RUNNING', g_listening: 'LISTENING · others', g_docker: 'DOCKER', g_repos: 'REPOSITORIES',
+    empty: 'No servers running.<br>Use “Import” to add a repository and run it here.',
+    run: '▶ Run', stop: 'Stop', startC: '▶ Start', restart: 'Restart', logs: 'Logs', folder: 'Folder', remove: 'Remove from list',
+    noScript: 'No run script', open: '↗ Open', kill: 'kill', back: '← Back', logsTitle: 'Logs',
+    openBrowserTip: 'Open in browser', dockerRunTip: 'Build from Dockerfile and run',
+    postman: 'Postman', postmanTip: 'Copy URL and open Postman',
+  },
+}
+let LANG = 'ko'
+const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.ko[k] || k
+
+// ---------- state ----------
 const listEl = document.getElementById('list')
 const logPane = document.getElementById('logpane')
 const logBody = document.getElementById('log-body')
 const logTitle = document.getElementById('log-title')
 
-let selectedId = null      // repo whose logs are shown
-let repoNames = {}         // id -> name (for log title)
+let selectedId = null
+let repoNames = {}
+let postmanAvailable = false
 
 function el(tag, cls, text) {
   const e = document.createElement(tag)
@@ -14,36 +42,34 @@ function el(tag, cls, text) {
   if (text != null) e.textContent = text
   return e
 }
+function portBadge(port) {
+  const b = el('span', 'badge port', `:${port}`)
+  b.style.cursor = 'pointer'
+  b.title = t('openBrowserTip')
+  b.onclick = () => window.api.openUrl(port)
+  return b
+}
 
+// ---------- rows (2-row card: info on top, buttons below) ----------
 function repoRow(r) {
   repoNames[r.id] = r.name
-  const row = el('div', 'row')
+  const row = el('div', 'row card')
 
-  const dot = el('span', 'dot' + (r.running ? ' on' : ''))
-  row.appendChild(dot)
-
+  const top = el('div', 'row-top')
+  top.appendChild(el('span', 'dot' + (r.running ? ' on' : '')))
   const meta = el('div', 'meta')
   meta.appendChild(el('div', 'name', r.name))
   meta.appendChild(el('div', 'sub', r.path))
-  row.appendChild(meta)
-
-  if (r.port) {
-    const b = el('span', 'badge port', `:${r.port}`)
-    b.style.cursor = 'pointer'
-    b.title = '브라우저로 열기'
-    b.onclick = () => window.api.openUrl(r.port)
-    row.appendChild(b)
-  }
-  row.appendChild(el('span', 'badge', r.pm))
-  if (r.git) {
-    const g = el('span', 'badge', 'git')
-    g.title = r.git
-    row.appendChild(g)
-  }
+  top.appendChild(meta)
+  if (r.port) top.appendChild(portBadge(r.port))
+  if (r.framework) top.appendChild(el('span', 'badge fw', r.framework))
+  top.appendChild(el('span', 'badge', r.pm))
+  if (r.git) { const g = el('span', 'badge', 'git'); g.title = r.git; top.appendChild(g) }
+  row.appendChild(top)
 
   const controls = el('div', 'controls')
   if (r.running) {
-    const stop = el('button', 'danger small', '정지')
+    const stop = el('button', 'danger small', t('stop'))
     stop.onclick = () => window.api.stop(r.id)
     controls.appendChild(stop)
   } else {
@@ -54,32 +80,36 @@ function repoRow(r) {
       opts.forEach((s) => { const o = el('option', null, s); o.value = s; sel.appendChild(o) })
       sel.value = r.script && opts.includes(r.script) ? r.script : opts[0]
       sel.onchange = () => window.api.setScript(r.id, sel.value)
-      const start = el('button', 'primary small', '▶ 실행')
+      const start = el('button', 'primary small', t('run'))
       start.onclick = () => window.api.start(r.id, sel.value)
       controls.append(sel, start)
     } else {
-      const start = el('button', 'primary small', '▶ 실행')
+      const start = el('button', 'primary small', t('run'))
       start.disabled = true
-      start.title = '실행할 스크립트가 없음'
+      start.title = t('noScript')
       controls.appendChild(start)
     }
   }
   if (r.dockerfile) {
     const d = el('button', 'ghost small', '🐳')
-    d.title = 'Dockerfile로 빌드 후 실행'
+    d.title = t('dockerRunTip')
     d.onclick = () => { repoNames['build:' + r.id] = r.name + ' · docker'; window.api.dockerRun(r.id); openLogs('build:' + r.id) }
     controls.appendChild(d)
   }
-  const logBtn = el('button', 'ghost small', '로그')
+  if (r.isBackend && postmanAvailable) {
+    const p = el('button', 'ghost small', t('postman'))
+    p.title = t('postmanTip')
+    p.onclick = () => window.api.openPostman(r.port || null)
+    controls.appendChild(p)
+  }
+  const logBtn = el('button', 'ghost small', t('logs'))
   logBtn.onclick = () => openLogs(r.id)
   controls.appendChild(logBtn)
-
-  const folder = el('button', 'ghost small', '폴더')
+  const folder = el('button', 'ghost small', t('folder'))
   folder.onclick = () => window.api.openPath(r.path)
   controls.appendChild(folder)
-
   const rm = el('button', 'ghost small', '✕')
-  rm.title = '목록에서 제거'
+  rm.title = t('remove')
   rm.onclick = async () => { await window.api.removeRepo(r.id); refresh() }
   controls.appendChild(rm)
 
@@ -89,31 +119,28 @@ function repoRow(r) {
 
 function containerRow(c) {
   repoNames['docker:' + c.id] = c.name
-  const row = el('div', 'row')
-  row.appendChild(el('span', 'dot' + (c.state === 'running' ? ' on' : '')))
+  const row = el('div', 'row card')
+  const top = el('div', 'row-top')
+  top.appendChild(el('span', 'dot' + (c.state === 'running' ? ' on' : '')))
   const meta = el('div', 'meta')
   meta.appendChild(el('div', 'name', c.name))
   meta.appendChild(el('div', 'sub', `${c.image} · ${c.status}`))
-  row.appendChild(meta)
-  c.ports.forEach((port) => {
-    const b = el('span', 'badge port', `:${port}`)
-    b.style.cursor = 'pointer'
-    b.onclick = () => window.api.openUrl(port)
-    row.appendChild(b)
-  })
-  row.appendChild(el('span', 'badge', 'docker'))
+  top.appendChild(meta)
+  c.ports.forEach((port) => top.appendChild(portBadge(port)))
+  top.appendChild(el('span', 'badge', 'docker'))
+  row.appendChild(top)
 
   const controls = el('div', 'controls')
   if (c.state === 'running') {
-    const log = el('button', 'ghost small', '로그')
+    const log = el('button', 'ghost small', t('logs'))
     log.onclick = () => openLogs('docker:' + c.id)
-    const stop = el('button', 'danger small', '정지')
-    stop.onclick = () => window.api.dockerAction(c.id, 'stop')
-    const restart = el('button', 'ghost small', '재시작')
+    const restart = el('button', 'ghost small', t('restart'))
     restart.onclick = () => window.api.dockerAction(c.id, 'restart')
+    const stop = el('button', 'danger small', t('stop'))
+    stop.onclick = () => window.api.dockerAction(c.id, 'stop')
     controls.append(log, restart, stop)
   } else {
-    const start = el('button', 'primary small', '▶ 시작')
+    const start = el('button', 'primary small', t('startC'))
     start.onclick = () => window.api.dockerAction(c.id, 'start')
     controls.appendChild(start)
   }
@@ -122,50 +149,47 @@ function containerRow(c) {
 }
 
 function discoveredRow(p) {
-  const row = el('div', 'row')
-  row.appendChild(el('span', 'dot on'))
+  const row = el('div', 'row card')
+  const top = el('div', 'row-top')
+  top.appendChild(el('span', 'dot on'))
   const meta = el('div', 'meta')
   meta.appendChild(el('div', 'name', `:${p.port}`))
   meta.appendChild(el('div', 'sub', `${p.command} · pid ${p.pid}${p.cwd ? ' · ' + p.cwd : ''}`))
-  row.appendChild(meta)
+  top.appendChild(meta)
+  row.appendChild(top)
+
   const controls = el('div', 'controls')
-  const open = el('button', 'ghost small', '↗ 열기')
+  const open = el('button', 'ghost small', t('open'))
   open.onclick = () => window.api.openUrl(p.port)
-  controls.appendChild(open)
-  const kill = el('button', 'danger small', 'kill')
+  const kill = el('button', 'danger small', t('kill'))
   kill.onclick = () => window.api.killPid(p.pid)
-  controls.appendChild(kill)
+  controls.append(open, kill)
   row.appendChild(controls)
   return row
 }
 
 async function refresh() {
-  const { repos, discovered, containers = [] } = await window.api.snapshot()
+  const snap = await window.api.snapshot()
+  const { repos, discovered, containers = [] } = snap
+  postmanAvailable = !!snap.postmanAvailable
   listEl.innerHTML = ''
 
   const runningRepos = repos.filter((r) => r.running)
   const stoppedRepos = repos.filter((r) => !r.running)
 
-  // Lead with what's actually running, then everything else.
-  if (runningRepos.length) {
-    listEl.appendChild(el('div', 'group-label', 'RUNNING'))
-    runningRepos.forEach((r) => listEl.appendChild(repoRow(r)))
+  const section = (label, items, build) => {
+    if (!items.length) return
+    listEl.appendChild(el('div', 'group-label', label))
+    items.forEach((x) => listEl.appendChild(build(x)))
   }
-  if (discovered.length) {
-    listEl.appendChild(el('div', 'group-label', 'LISTENING · 실행 중'))
-    discovered.forEach((p) => listEl.appendChild(discoveredRow(p)))
-  }
-  if (containers.length) {
-    listEl.appendChild(el('div', 'group-label', 'DOCKER'))
-    containers.forEach((c) => listEl.appendChild(containerRow(c)))
-  }
-  if (stoppedRepos.length) {
-    listEl.appendChild(el('div', 'group-label', 'REPOSITORIES'))
-    stoppedRepos.forEach((r) => listEl.appendChild(repoRow(r)))
-  }
+  section(t('g_running'), runningRepos, repoRow)
+  section(t('g_listening'), discovered, discoveredRow)
+  section(t('g_docker'), containers, containerRow)
+  section(t('g_repos'), stoppedRepos, repoRow)
+
   if (!runningRepos.length && !discovered.length && !containers.length && !stoppedRepos.length) {
     const e = el('div', 'empty')
-    e.innerHTML = '실행 중인 서버가 없습니다.<br>“가져오기”로 레포를 추가하면 여기서 실행할 수 있어요.'
+    e.innerHTML = t('empty')
     listEl.appendChild(e)
   }
 }
@@ -176,30 +200,46 @@ function appendLog(stream, text) {
   logBody.appendChild(span)
   logBody.scrollTop = logBody.scrollHeight
 }
-
 function stopDockerTailIfAny(id) {
   if (typeof id === 'string' && id.startsWith('docker:')) window.api.dockerUntail(id.slice(7))
 }
-
 async function openLogs(id) {
   if (selectedId && selectedId !== id) stopDockerTailIfAny(selectedId)
   selectedId = id
   if (id.startsWith('docker:')) await window.api.dockerTail(id.slice(7))
-  logTitle.textContent = `로그 · ${repoNames[id] || ''}`
+  logTitle.textContent = `${t('logsTitle')} · ${repoNames[id] || ''}`
   logBody.innerHTML = ''
   const lines = await window.api.logs(id)
   lines.forEach((l) => appendLog(l.stream, l.text))
   logPane.hidden = false
 }
-
 document.getElementById('log-close').onclick = () => {
   stopDockerTailIfAny(selectedId)
   logPane.hidden = true
   selectedId = null
 }
-// import menu (cmux / local git / folder)
+
+// ---------- header / static i18n ----------
 const importBtn = document.getElementById('btn-import')
 const importMenu = document.getElementById('import-menu')
+const pinBtn = document.getElementById('btn-pin')
+const langBtn = document.getElementById('btn-lang')
+const logCloseBtn = document.getElementById('log-close')
+
+function applyStaticI18n() {
+  importBtn.textContent = t('import')
+  langBtn.textContent = LANG === 'ko' ? 'EN' : '한'
+  logCloseBtn.textContent = t('back')
+  importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
+    b.querySelector('.label').textContent = t('src_' + b.dataset.src)
+  })
+  updatePinLabel()
+}
+async function updatePinLabel() {
+  const d = await window.api.getDesktop()
+  pinBtn.textContent = d ? t('menubar') : t('desktop')
+}
+
 importBtn.onclick = (e) => { e.stopPropagation(); importMenu.hidden = !importMenu.hidden }
 document.addEventListener('click', () => { importMenu.hidden = true })
 importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
@@ -213,20 +253,25 @@ importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
     refresh()
   }
 })
-
-// desktop / popover mode toggle
-const pinBtn = document.getElementById('btn-pin')
-;(async () => {
-  const d = await window.api.getDesktop()
-  pinBtn.textContent = d ? '메뉴바' : '데스크탑'
-  pinBtn.title = d ? '메뉴바 팝오버로 전환' : '데스크탑 창으로 고정'
-})()
-pinBtn.onclick = (e) => { e.stopPropagation(); window.api.toggleDesktop() } // window is recreated, page reloads
+pinBtn.onclick = (e) => { e.stopPropagation(); window.api.toggleDesktop() } // window recreated → page reloads
+langBtn.onclick = async (e) => {
+  e.stopPropagation()
+  LANG = LANG === 'ko' ? 'en' : 'ko'
+  await window.api.setLang(LANG)
+  applyStaticI18n()
+  refresh()
+}
 
 window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })
 window.api.onStarted(() => refresh())
-window.api.onExit((d) => { if (d.id === selectedId) appendLog('err', `\n[portboard] 종료 (code ${d.code})\n`); refresh() })
+window.api.onExit((d) => { if (d.id === selectedId) appendLog('err', `\n[portboard] exited (code ${d.code})\n`); refresh() })
 
-refresh()
-setInterval(refresh, 3000)
+// ---------- init ----------
+;(async () => {
+  const cfg = await window.api.getConfig()
+  LANG = cfg.lang === 'en' ? 'en' : 'ko'
+  applyStaticI18n()
+  refresh()
+  setInterval(refresh, 3000)
+})()
