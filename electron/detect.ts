@@ -70,6 +70,14 @@ export function isUnder(child: string | null | undefined, parent: string | null 
   return !!(child && parent && (child === parent || child.startsWith(parent.replace(/\/?$/, '/'))))
 }
 
+// The deepest (longest) path in `paths` that contains `cwd` — so a parent repo doesn't
+// absorb a server running inside a more-specific child repo.
+export function deepestContaining(cwd: string | null | undefined, paths: string[]): string | null {
+  let best: string | null = null
+  for (const p of paths) if (isUnder(cwd, p) && (!best || p.length > best.length)) best = p
+  return best
+}
+
 // Parse `lsof -nP -iTCP -sTCP:LISTEN` output → one entry per port.
 export function parseLsofListen(stdout: string): PortInfo[] {
   const byPort = new Map<number, PortInfo>()

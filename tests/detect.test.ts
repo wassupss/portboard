@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName, isUnder,
   parseLsofListen, parseDockerPorts, parseDockerPs, parseCmuxEvents, filterDiscovered,
-  shQuote, isSafeDockerRef,
+  shQuote, isSafeDockerRef, deepestContaining,
   type PortInfo,
 } from '../electron/detect'
 
@@ -88,6 +88,20 @@ describe('isUnder', () => {
     expect(isUnder('/a/b', '/a/b')).toBe(true)
     expect(isUnder('/a/bc', '/a/b')).toBe(false) // prefix but not a child
     expect(isUnder(null, '/a')).toBe(false)
+  })
+})
+
+describe('deepestContaining', () => {
+  const repos = ['/Users/me/workspace', '/Users/me/workspace/fe-admin', '/Users/me/hs-playground']
+  it('assigns a cwd to the most-specific repo (not the parent)', () => {
+    expect(deepestContaining('/Users/me/workspace/fe-admin', repos)).toBe('/Users/me/workspace/fe-admin')
+    expect(deepestContaining('/Users/me/workspace/fe-admin/src', repos)).toBe('/Users/me/workspace/fe-admin')
+  })
+  it('falls back to the parent when no deeper repo matches', () => {
+    expect(deepestContaining('/Users/me/workspace/other', repos)).toBe('/Users/me/workspace')
+  })
+  it('returns null when nothing contains it', () => {
+    expect(deepestContaining('/tmp/x', repos)).toBeNull()
   })
 })
 

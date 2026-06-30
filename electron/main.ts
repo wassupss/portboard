@@ -6,7 +6,7 @@ import * as https from 'https'
 import { spawn, exec, execFile } from 'child_process'
 import {
   pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName, shQuote, isSafeDockerRef,
-  isUnder, parseLsofListen, parseDockerPs, parseCmuxEvents, filterDiscovered,
+  isUnder, deepestContaining, parseLsofListen, parseDockerPs, parseCmuxEvents, filterDiscovered,
   type Pm,
 } from './detect'
 
@@ -185,11 +185,13 @@ async function snapshot() {
   const [ports, containers] = await Promise.all([scanListeningPorts(), dockerPs()])
   await Promise.all(ports.map(async (p: any) => { p.cwd = await pidCwd(p.pid) }))
 
+  const repoPaths = cfg.repos.map((r: any) => r.path)
+
   const repos = cfg.repos.map((r: any) => {
     const meta = repoMeta(r.path)
-    // A listening pid whose cwd is inside the repo → its server is up (even if we didn't start it).
-    // Prefer the lowest matching port (the app port, not an ephemeral HMR/inspector port).
-    const matched = ports.filter((p: any) => isUnder(p.cwd, r.path)).sort((a: any, b: any) => a.port - b.port)
+    // Listening pids owned by this repo (deepest match wins so a parent repo doesn't absorb a
+    // child's server). Prefer the lowest port (the app port, not an ephemeral HMR/inspector one).
+    const matched = ports.filter((p: any) => deepestContaining(p.cwd, repoPaths) === r.path).sort((a: any, b: any) => a.port - b.port)
     const match = matched[0]
     const managed = running.has(r.id)
     return {
@@ -208,7 +210,6 @@ async function snapshot() {
     }
   })
 
-  const repoPaths = cfg.repos.map((r: any) => r.path)
   const dockerHostPorts = new Set<number>(containers.flatMap((c: any) => c.ports))
   const discovered = filterDiscovered(ports, repoPaths, dockerHostPorts)
 
