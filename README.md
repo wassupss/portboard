@@ -62,6 +62,16 @@ Builds are currently **unsigned**, so on first launch macOS will warn — right-
 npm run dist   # → dist/Portboard-*.dmg  (+ .zip)
 ```
 
+## Updates
+
+On launch (and every 6h) the app checks the GitHub Releases API and, if a newer version exists,
+shows a "new version available → Download" bar that opens the release page. Install is manual.
+
+Seamless background auto-update (`electron-updater` / Squirrel.Mac) requires a **code-signed**
+app, so it's intentionally not enabled while builds are unsigned. The release already ships the
+`.zip` + `latest-mac.yml` feed needed for it, so flipping to real auto-update is a small change
+once signing is in place.
+
 ## Releasing
 
 A GitHub Actions workflow builds and publishes on every version tag:

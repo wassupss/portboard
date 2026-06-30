@@ -25,7 +25,7 @@
     "productName": "Portboard",
     "directories": { "buildResources": "build-resources" },
     "files": ["build/**", "package.json"],
-    "publish": [{ "provider": "github", "owner": "wassupss", "repo": "portboard" }],
+    "publish": [{ "provider": "github", "owner": "wassupss", "repo": "portboard", "releaseType": "release" }],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build-resources/icon.png",

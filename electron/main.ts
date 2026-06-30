@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, sc
 import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
+import * as https from 'https'
 import { spawn, exec, execFile } from 'child_process'
 import {
   pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName, shQuote, isSafeDockerRef,
@@ -427,6 +428,8 @@ ipcMain.handle('docker:untail', (_e, cid) => dockerTailStop(cid))
 
 ipcMain.handle('open:url', (_e, port) => shell.openExternal(`http://localhost:${port}`))
 ipcMain.handle('open:path', (_e, p) => shell.openPath(p))
+ipcMain.handle('open:external', (_e, url) => { if (typeof url === 'string' && /^https:\/\//.test(url)) shell.openExternal(url) })
+ipcMain.handle('update:get', () => pendingUpdate)
 ipcMain.handle('proc:kill', (_e, pid) => { try { process.kill(pid, 'SIGTERM') } catch {} })
 
 ipcMain.handle('lang:set', (_e, l) => {
@@ -442,6 +445,33 @@ ipcMain.handle('postman:open', (_e, port) => {
   exec('open -a Postman')
   return true
 })
+
+// ---------- update check (notify-only; real auto-update needs code signing) ----------
+let pendingUpdate: { version: string; url: string } | null = null
+
+function semverGt(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x > y }
+  return false
+}
+
+function checkForUpdate() {
+  const opts = { headers: { 'User-Agent': 'Portboard', Accept: 'application/vnd.github+json' } }
+  https.get('https://api.github.com/repos/wassupss/portboard/releases/latest', opts, (res) => {
+    let body = ''
+    res.on('data', (d) => (body += d))
+    res.on('end', () => {
+      try {
+        const j = JSON.parse(body)
+        const latest = String(j.tag_name || '').replace(/^v/, '')
+        if (latest && semverGt(latest, app.getVersion())) {
+          pendingUpdate = { version: latest, url: j.html_url }
+          emit('update:available', pendingUpdate)
+        }
+      } catch {}
+    })
+  }).on('error', () => {})
+}
 
 // ---------- menu bar (Tray) ----------
 function positionUnderTray() {
@@ -538,6 +568,9 @@ app.whenReady().then(() => {
   setInterval(refreshTray, 3000)
   if (desktopMode) showWindow()
   app.on('activate', () => showWindow())
+
+  setTimeout(checkForUpdate, 4000)
+  setInterval(checkForUpdate, 6 * 60 * 60 * 1000) // re-check every 6h
 })
 
 app.on('window-all-closed', () => {})

@@ -24,7 +24,11 @@ const api: PortboardApi = {
 
   openUrl: (port) => ipcRenderer.invoke('open:url', port),
   openPath: (p) => ipcRenderer.invoke('open:path', p),
+  openExternal: (url) => ipcRenderer.invoke('open:external', url),
   killPid: (pid) => ipcRenderer.invoke('proc:kill', pid),
+
+  getUpdate: () => ipcRenderer.invoke('update:get'),
+  onUpdateAvailable: (cb) => { ipcRenderer.on('update:available', (_e, u) => cb(u)) },
 
   dockerAction: (id, action) => ipcRenderer.invoke('docker:action', id, action),
   dockerTail: (cid) => ipcRenderer.invoke('docker:tail', cid),

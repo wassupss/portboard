@@ -22,7 +22,10 @@ interface PortboardApi {
   openPostman(port: number | null): Promise<any>
   openUrl(port: number): Promise<any>
   openPath(p: string): Promise<any>
+  openExternal(url: string): Promise<any>
   killPid(pid: number): Promise<any>
+  getUpdate(): Promise<{ version: string; url: string } | null>
+  onUpdateAvailable(cb: (u: { version: string; url: string }) => void): void
   dockerAction(id: string, action: string): Promise<any>
   dockerTail(cid: string): Promise<any>
   dockerUntail(cid: string): Promise<any>

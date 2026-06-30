@@ -47,6 +47,15 @@ npm test         # vitest — electron/detect.ts 순수 로직 단위 테스트
 순수·의존성 없는 로직(프레임워크/패키지매니저 감지, lsof·`docker ps`·cmux 파싱, 포트 필터링)은
 `electron/detect.ts`에 모아 두었고 `tests/`에서 테스트합니다.
 
+## 업데이트
+
+앱 실행 시(그리고 6시간마다) GitHub Releases API를 확인해, 새 버전이 있으면 "새 버전 사용 가능 →
+다운로드" 바를 띄워 릴리스 페이지를 엽니다(설치는 수동).
+
+무중단 자동 업데이트(`electron-updater` / Squirrel.Mac)는 **코드 서명된** 앱이 필요해서, unsigned
+동안은 의도적으로 비활성화했습니다. 릴리스에는 이미 자동 업데이트에 필요한 `.zip` + `latest-mac.yml`
+피드가 포함돼 있어, 서명만 붙이면 실제 자동 업데이트로 쉽게 전환됩니다.
+
 ## .app / .dmg 빌드
 
 ```sh

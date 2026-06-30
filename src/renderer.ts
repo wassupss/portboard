@@ -11,6 +11,7 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     noScript: '실행할 스크립트 없음', open: '↗ 열기', kill: 'kill', back: '← 뒤로', logsTitle: '로그',
     openBrowserTip: '브라우저로 열기', dockerBuildTip: 'Docker 이미지 빌드', dockerRunTip: '빌드 후 컨테이너 실행',
     postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행', openDockerTip: 'Docker Desktop 열기',
+    updateAvailable: '새 버전 v{v} 사용 가능', download: '다운로드',
   },
   en: {
     menu: 'Menu ▾', m_import: 'Import', m_lang: 'Language', toDesktop: 'Desktop window', toMenubar: 'Menu-bar popover',
@@ -21,6 +22,7 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     noScript: 'No run script', open: '↗ Open', kill: 'kill', back: '← Back', logsTitle: 'Logs',
     openBrowserTip: 'Open in browser', dockerBuildTip: 'Build Docker image', dockerRunTip: 'Build then run container',
     postman: 'Postman', postmanTip: 'Copy URL and open Postman', openDockerTip: 'Open Docker Desktop',
+    updateAvailable: 'New version v{v} available', download: 'Download',
   },
 }
 let LANG: 'ko' | 'en' = 'ko'
@@ -262,6 +264,20 @@ appMenu.querySelectorAll('.popmenu-item').forEach((b) => {
   }
 })
 dockerBtn.onclick = (e) => { e.stopPropagation(); window.api.openDockerApp() }
+
+// update notification (download link; macOS auto-install needs code signing)
+const updateBar = document.getElementById('update-bar')!
+function showUpdate(u: { version: string; url: string }) {
+  if (!u) return
+  document.getElementById('update-text')!.textContent = t('updateAvailable').replace('{v}', u.version)
+  const dl = document.getElementById('update-download')! as HTMLButtonElement
+  dl.textContent = t('download')
+  dl.onclick = () => window.api.openExternal(u.url)
+  updateBar.hidden = false
+}
+document.getElementById('update-dismiss')!.onclick = () => { updateBar.hidden = true }
+window.api.onUpdateAvailable(showUpdate)
+window.api.getUpdate().then((u) => { if (u) showUpdate(u) })
 
 window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })
