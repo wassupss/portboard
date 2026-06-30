@@ -1,11 +1,6 @@
 node_modules/
+build/
 dist/
 .DS_Store
 *.log
-
-# compiled TypeScript output (built by `npm run build`)
-electron/main.js
-electron/preload.js
-electron/detect.js
-src/renderer.js
 *.tsbuildinfo

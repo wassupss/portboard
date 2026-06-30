@@ -49,13 +49,31 @@ npm test         # vitest — unit tests for the pure logic in electron/detect.t
 Pure, dependency-free logic (framework / package-manager detection, lsof + `docker ps` + cmux
 parsing, port filtering) lives in `electron/detect.ts` and is covered by `tests/`.
 
-## Build a .app / .dmg
+## Download
+
+Grab the latest `.dmg` (Apple Silicon) from the [Releases](https://github.com/wassupss/portboard/releases) page.
+
+Builds are currently **unsigned**, so on first launch macOS will warn — right-click the app →
+**Open**, or run `xattr -dr com.apple.quarantine /Applications/Portboard.app`.
+
+## Build a .app / .dmg locally
 
 ```sh
-npm run dist   # → dist/Portboard-*.dmg
+npm run dist   # → dist/Portboard-*.dmg  (+ .zip)
 ```
 
-Unsigned first launch: right-click → Open, or `xattr -dr com.apple.quarantine /Applications/Portboard.app`.
+## Releasing
+
+A GitHub Actions workflow builds and publishes on every version tag:
+
+```sh
+npm version patch          # bumps package.json + creates a git tag
+git push --follow-tags     # triggers .github/workflows/release.yml
+```
+
+The workflow (`macos-14`, arm64) runs tests, compiles, and uploads the `.dmg`/`.zip` to a GitHub
+Release. It's **unsigned by default**; to ship a signed + notarized build, add the Apple
+Developer secrets listed in `release.yml` and set `"mac": { "notarize": true }` in `package.json`.
 
 The menu-bar icon is generated (no binary asset committed): `node scripts/make-tray-icon.js`.
 

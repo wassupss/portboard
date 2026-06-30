@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName, isUnder,
   parseLsofListen, parseDockerPorts, parseDockerPs, parseCmuxEvents, filterDiscovered,
+  shQuote, isSafeDockerRef,
   type PortInfo,
 } from '../electron/detect'
 
@@ -56,6 +57,28 @@ describe('sanitizeName', () => {
   })
   it('falls back to "app" for non-ascii', () => {
     expect(sanitizeName('통합 어드민')).toBe('app')
+  })
+})
+
+describe('shQuote (shell-injection safety)', () => {
+  it('wraps in single quotes and neutralizes embedded quotes', () => {
+    expect(shQuote('/safe/path')).toBe("'/safe/path'")
+    expect(shQuote("a'b")).toBe("'a'\\''b'")
+  })
+  it('renders command-substitution payloads inert (literal)', () => {
+    // The dangerous chars survive only as literal text inside single quotes.
+    expect(shQuote('/tmp/$(touch pwned)')).toBe("'/tmp/$(touch pwned)'")
+    expect(shQuote('`id`')).toBe("'`id`'")
+  })
+})
+
+describe('isSafeDockerRef', () => {
+  it('accepts container ids / names, rejects injection', () => {
+    expect(isSafeDockerRef('abc123')).toBe(true)
+    expect(isSafeDockerRef('portboard-test-ocr')).toBe(true)
+    expect(isSafeDockerRef('stop; rm -rf ~')).toBe(false)
+    expect(isSafeDockerRef('$(id)')).toBe(false)
+    expect(isSafeDockerRef('')).toBe(false)
   })
 })
 

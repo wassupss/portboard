@@ -56,6 +56,16 @@ export function sanitizeName(s: string): string {
   return out || 'app'
 }
 
+// Wrap an arbitrary string as a single shell argument (neutralizes $, `, ", spaces, ;, etc.).
+export function shQuote(s: string): string {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
+}
+
+// Docker container id / name charset — used to reject injection in IPC-supplied values.
+export function isSafeDockerRef(s: string): boolean {
+  return typeof s === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(s)
+}
+
 export function isUnder(child: string | null | undefined, parent: string | null | undefined): boolean {
   return !!(child && parent && (child === parent || child.startsWith(parent.replace(/\/?$/, '/'))))
 }

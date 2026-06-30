@@ -3,15 +3,15 @@
   "productName": "Portboard",
   "version": "0.1.0",
   "description": "Menu-bar dashboard for macOS — see, start and stop your local dev servers and Docker containers, all by port.",
-  "main": "electron/main.js",
+  "main": "build/electron/main.js",
   "author": "wassupss",
   "license": "MIT",
   "scripts": {
-    "build": "tsc",
-    "start": "tsc && electron .",
+    "build": "tsc && node scripts/copy-assets.js",
+    "start": "npm run build && electron .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "tsc && electron-builder --mac"
+    "dist": "npm run build && electron-builder --mac"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -23,10 +23,11 @@
   "build": {
     "appId": "com.wassupss.portboard",
     "productName": "Portboard",
-    "files": ["electron/**", "src/**", "package.json"],
+    "files": ["build/**", "package.json"],
+    "publish": [{ "provider": "github", "owner": "wassupss", "repo": "portboard" }],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg"]
+      "target": ["dmg", "zip"]
     }
   }
 }

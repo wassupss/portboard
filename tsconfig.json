@@ -12,7 +12,7 @@
     "resolveJsonModule": true,
     "sourceMap": false,
     "rootDir": ".",
-    "outDir": "."
+    "outDir": "build"
   },
   "include": ["electron/**/*.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]

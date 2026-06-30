@@ -2,9 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, sc
 import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
-import { spawn, exec } from 'child_process'
+import { spawn, exec, execFile } from 'child_process'
 import {
-  pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName,
+  pickPm, detectFramework, runnableScripts, needsBuild, sanitizeName, shQuote, isSafeDockerRef,
   isUnder, parseLsofListen, parseDockerPs, parseCmuxEvents, filterDiscovered,
   type Pm,
 } from './detect'
@@ -27,9 +27,11 @@ const POSTMAN_AVAILABLE = (() => {
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 // Run a command through a login shell so PATH (docker, pnpm, node shims) resolves like Terminal.
+// execFile (not exec) → SHELL is invoked directly with argv, avoiding an extra /bin/sh layer
+// that would re-expand $(), backticks, etc. from the command string.
 function loginExec(cmd: string): Promise<{ err: any; stdout: string }> {
   return new Promise((resolve) => {
-    exec(`${SHELL} -lc ${JSON.stringify(cmd)}`, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    execFile(SHELL, ['-lc', cmd], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       resolve({ err, stdout: stdout || '' })
     })
   })
@@ -220,14 +222,16 @@ async function dockerPs(): Promise<any[]> {
   return parseDockerPs(stdout)
 }
 
+const DOCKER_ACTIONS = new Set(['start', 'stop', 'restart'])
 async function dockerAction(id: string, action: string) {
-  await loginExec(`docker ${action} ${id}`)
+  if (!DOCKER_ACTIONS.has(action) || !isSafeDockerRef(id)) return // reject injected values
+  await loginExec(`docker ${action} ${shQuote(id)}`)
   refreshTray()
 }
 
 function dockerTailStart(cid: string) {
-  if (dockerTails.has(cid)) return
-  const child = spawn(SHELL, ['-lc', `docker logs -f --tail 300 ${cid}`], { detached: true })
+  if (dockerTails.has(cid) || !isSafeDockerRef(cid)) return
+  const child = spawn(SHELL, ['-lc', `docker logs -f --tail 300 ${shQuote(cid)}`], { detached: true })
   const entry: Task = { child, logs: [] }
   dockerTails.set(cid, entry)
   const push = (d: any, stream: string) => {
@@ -279,7 +283,7 @@ function dockerBuild(id: string) {
   streamBuildTask(id, [
     'set -e',
     `echo "[portboard] $ docker build -t ${tag} ."`,
-    `docker build -t ${tag} ${JSON.stringify(repo.path)}`,
+    `docker build -t ${tag} ${shQuote(repo.path)}`,
     'echo "[portboard] build done."',
   ], repo.path)
 }
@@ -293,7 +297,7 @@ function dockerRun(id: string) {
     'set -e',
     `if ! docker image inspect ${tag} >/dev/null 2>&1; then`,
     `  echo "[portboard] building image ${tag} …"`,
-    `  docker build -t ${tag} ${JSON.stringify(repo.path)}`,
+    `  docker build -t ${tag} ${shQuote(repo.path)}`,
     'else',
     `  echo "[portboard] image ${tag} exists — skipping build"`,
     'fi',
@@ -509,9 +513,17 @@ function createWindow() {
     skipTaskbar: !desktopMode,
     show: false,
     title: 'Portboard',
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,   // renderer can't touch Node/Electron internals
+      nodeIntegration: false,
+      sandbox: true,
+    },
   })
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'))
+  // The app only ever loads its bundled local UI — block any navigation / new windows.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e) => e.preventDefault())
   win.on('blur', () => { if (!dialogOpen && !desktopMode && win && !win.isDestroyed()) win.hide() })
   win.on('closed', () => { win = null })
 }
