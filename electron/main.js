@@ -62,7 +62,13 @@ function repoMeta(repoPath) {
     scripts = Object.keys(pkg.scripts || {})
     hasStart = scripts.includes('start') || scripts.includes('dev')
   } catch {}
-  return { pm: detectPm(repoPath), hasStart, scripts }
+  let git = null
+  try {
+    const conf = fs.readFileSync(path.join(repoPath, '.git', 'config'), 'utf8')
+    const m = conf.match(/url\s*=\s*(.+)/)
+    if (m) git = m[1].trim()
+  } catch {}
+  return { pm: detectPm(repoPath), hasStart, scripts, git }
 }
 
 // ---------- process management ----------
@@ -184,22 +190,23 @@ async function snapshot() {
       pm: r.pm || meta.pm,
       hasStart: meta.hasStart,
       scripts: meta.scripts,
+      git: meta.git,
       running: isRunning,
       port: match ? match.port : null,
     }
   })
 
-  // discovered = listening dev-ish ports not mapped to any configured repo.
-  // Filter out system services so the menu stays concise: keep known dev runtimes
-  // or ports in the common local-dev range.
-  const DEV_CMDS = /^(node|bun|deno|next|vite|nest|ng|webpack|esbuild|python\d?|ruby|rails|puma|php|java|gradle|dotnet|air|go|rustc|cargo|turbo)/i
+  // discovered = listening dev-server ports not mapped to a configured repo.
+  // Match by dev runtime command only (port-range heuristics catch system noise
+  // like AirPlay/ControlCenter on 5000/7000).
+  const DEV_CMDS = /^(node|bun|deno|next|vite|nest|ng|webpack|esbuild|tsx|nodemon|python\d?|uvicorn|gunicorn|ruby|rails|puma|php|java|gradle|dotnet|air|go|rustc|cargo|turbo)/i
   const repoPaths = cfg.repos.map((r) => r.path)
   const dockerHostPorts = new Set(containers.flatMap((c) => c.ports))
   const discovered = ports
     .filter((p) => !repoPaths.some((rp) => isUnder(p.cwd, rp)))
     .filter((p) => !/docker|vpnkit|backend|colima/i.test(p.command)) // shown under containers instead
     .filter((p) => !dockerHostPorts.has(p.port)) // dedupe docker-published ports
-    .filter((p) => DEV_CMDS.test(p.command) || (p.port >= 3000 && p.port <= 9999))
+    .filter((p) => DEV_CMDS.test(p.command))
 
   return { repos, discovered, containers, dockerOk }
 }
@@ -302,28 +309,42 @@ ipcMain.handle('repo:add', async () => {
   return cfg
 })
 
-ipcMain.handle('dialog:pickFolder', async () => {
+// Track existing local git repos: scan the picked folder (and its immediate children)
+// for .git directories and add each as a tracked repo.
+function findGitRepos(base) {
+  const isGit = (p) => { try { return fs.existsSync(path.join(p, '.git')) } catch { return false } }
+  const found = []
+  if (isGit(base)) found.push(base)
+  try {
+    for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue
+      const p = path.join(base, e.name)
+      if (isGit(p)) found.push(p)
+    }
+  } catch {}
+  return [...new Set(found)]
+}
+
+ipcMain.handle('repo:addGit', async () => {
   dialogOpen = true
-  const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
+  const res = await dialog.showOpenDialog(win, {
+    properties: ['openDirectory'],
+    message: 'Git 저장소(또는 저장소들이 들어있는 폴더)를 선택하세요',
+  })
   dialogOpen = false
   if (win && !win.isDestroyed()) win.focus()
-  return res.canceled ? null : res.filePaths[0]
-})
-
-ipcMain.handle('repo:clone', async (_e, url, parentDir) => {
-  if (!url || !parentDir) return { ok: false, error: 'GitHub URL과 클론 위치가 필요합니다.' }
-  const name = (url.split('/').pop() || 'repo').replace(/\.git$/, '').trim()
-  if (!name) return { ok: false, error: 'URL에서 레포 이름을 알 수 없습니다.' }
-  const dest = path.join(parentDir, name)
-  if (fs.existsSync(dest)) return { ok: false, error: `이미 존재하는 경로입니다:\n${dest}` }
-  const { err, stdout } = await loginExec(`git clone ${JSON.stringify(url)} ${JSON.stringify(dest)} 2>&1`)
-  if (err) return { ok: false, error: (stdout || String(err)).trim().slice(-500) }
+  if (res.canceled || !res.filePaths[0]) return { added: 0, cfg: loadConfig() }
+  const repos = findGitRepos(res.filePaths[0])
   const cfg = loadConfig()
-  if (!cfg.repos.some((r) => r.path === dest)) {
-    cfg.repos.push({ id: rid(), name, path: dest })
-    saveConfig(cfg)
+  let added = 0
+  for (const p of repos) {
+    if (!cfg.repos.some((r) => r.path === p)) {
+      cfg.repos.push({ id: rid(), name: path.basename(p), path: p })
+      added++
+    }
   }
-  return { ok: true, path: dest }
+  if (added) saveConfig(cfg)
+  return { added, cfg }
 })
 
 ipcMain.handle('repo:importCmux', () => {

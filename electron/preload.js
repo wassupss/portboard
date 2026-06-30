@@ -7,10 +7,9 @@ contextBridge.exposeInMainWorld('api', {
   snapshot: () => ipcRenderer.invoke('snapshot'),
 
   addRepo: () => ipcRenderer.invoke('repo:add'),
+  addGit: () => ipcRenderer.invoke('repo:addGit'),
   importCmux: () => ipcRenderer.invoke('repo:importCmux'),
   removeRepo: (id) => ipcRenderer.invoke('repo:remove', id),
-  pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
-  cloneRepo: (url, parentDir) => ipcRenderer.invoke('repo:clone', url, parentDir),
 
   start: (id, script) => ipcRenderer.invoke('server:start', id, script),
   stop: (id) => ipcRenderer.invoke('server:stop', id),

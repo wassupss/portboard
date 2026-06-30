@@ -35,6 +35,11 @@ function repoRow(r) {
     row.appendChild(b)
   }
   row.appendChild(el('span', 'badge', r.pm))
+  if (r.git) {
+    const g = el('span', 'badge', 'git')
+    g.title = r.git
+    row.appendChild(g)
+  }
 
   const controls = el('div', 'controls')
   if (r.running) {
@@ -137,26 +142,27 @@ async function refresh() {
   const runningRepos = repos.filter((r) => r.running)
   const stoppedRepos = repos.filter((r) => !r.running)
 
-  if (repos.length === 0) {
-    const e = el('div', 'empty')
-    e.innerHTML = '아직 레포가 없습니다.<br>“cmux에서 가져오기” 또는 “+ 레포 추가”로 시작하세요.'
-    listEl.appendChild(e)
-  }
+  // Lead with what's actually running, then everything else.
   if (runningRepos.length) {
     listEl.appendChild(el('div', 'group-label', 'RUNNING'))
     runningRepos.forEach((r) => listEl.appendChild(repoRow(r)))
   }
-  if (stoppedRepos.length) {
-    listEl.appendChild(el('div', 'group-label', 'REPOSITORIES'))
-    stoppedRepos.forEach((r) => listEl.appendChild(repoRow(r)))
+  if (discovered.length) {
+    listEl.appendChild(el('div', 'group-label', 'LISTENING · 실행 중'))
+    discovered.forEach((p) => listEl.appendChild(discoveredRow(p)))
   }
   if (containers.length) {
     listEl.appendChild(el('div', 'group-label', 'DOCKER'))
     containers.forEach((c) => listEl.appendChild(containerRow(c)))
   }
-  if (discovered.length) {
-    listEl.appendChild(el('div', 'group-label', 'DISCOVERED · 관리 외 포트'))
-    discovered.forEach((p) => listEl.appendChild(discoveredRow(p)))
+  if (stoppedRepos.length) {
+    listEl.appendChild(el('div', 'group-label', 'REPOSITORIES'))
+    stoppedRepos.forEach((r) => listEl.appendChild(repoRow(r)))
+  }
+  if (!runningRepos.length && !discovered.length && !containers.length && !stoppedRepos.length) {
+    const e = el('div', 'empty')
+    e.innerHTML = '실행 중인 서버가 없습니다.<br>“가져오기”로 레포를 추가하면 여기서 실행할 수 있어요.'
+    listEl.appendChild(e)
   }
 }
 
@@ -187,7 +193,7 @@ document.getElementById('log-close').onclick = () => {
   logPane.hidden = true
   selectedId = null
 }
-// import menu (cmux / github / folder)
+// import menu (cmux / local git / folder)
 const importBtn = document.getElementById('btn-import')
 const importMenu = document.getElementById('import-menu')
 importBtn.onclick = (e) => { e.stopPropagation(); importMenu.hidden = !importMenu.hidden }
@@ -197,37 +203,17 @@ importMenu.querySelectorAll('.popmenu-item').forEach((b) => {
     e.stopPropagation()
     importMenu.hidden = true
     const src = b.dataset.src
-    if (src === 'cmux') { await window.api.importCmux(); refresh() }
-    else if (src === 'folder') { await window.api.addRepo(); refresh() }
-    else if (src === 'github') openCloneModal()
+    if (src === 'cmux') await window.api.importCmux()
+    else if (src === 'folder') await window.api.addRepo()
+    else if (src === 'git') await window.api.addGit()
+    refresh()
   }
 })
-
-// github clone modal
-const overlay = document.getElementById('clone-overlay')
-const urlIn = document.getElementById('clone-url')
-const dirIn = document.getElementById('clone-dir')
-const cloneStatus = document.getElementById('clone-status')
-function openCloneModal() {
-  urlIn.value = ''; dirIn.value = ''; cloneStatus.textContent = ''; cloneStatus.className = 'clone-status'
-  overlay.hidden = false; urlIn.focus()
-}
-function closeCloneModal() { overlay.hidden = true }
-document.getElementById('clone-cancel').onclick = closeCloneModal
-document.getElementById('clone-pick').onclick = async () => { const d = await window.api.pickFolder(); if (d) dirIn.value = d }
-document.getElementById('clone-go').onclick = async () => {
-  const url = urlIn.value.trim(), dir = dirIn.value.trim()
-  if (!url || !dir) { cloneStatus.textContent = 'URL과 위치를 입력하세요.'; cloneStatus.className = 'clone-status err'; return }
-  cloneStatus.textContent = '클론 중…'; cloneStatus.className = 'clone-status'
-  const res = await window.api.cloneRepo(url, dir)
-  if (res.ok) { closeCloneModal(); refresh() }
-  else { cloneStatus.textContent = res.error || '클론 실패'; cloneStatus.className = 'clone-status err' }
-}
 
 window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })
 window.api.onStarted(() => refresh())
-window.api.onExit((d) => { if (d.id === selectedId) appendLog('err', `\n[devdock] 종료 (code ${d.code})\n`); refresh() })
+window.api.onExit((d) => { if (d.id === selectedId) appendLog('err', `\n[portboard] 종료 (code ${d.code})\n`); refresh() })
 
 refresh()
 setInterval(refresh, 3000)

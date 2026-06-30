@@ -14,7 +14,7 @@
         <button id="btn-import" class="primary">가져오기 ▾</button>
         <div id="import-menu" class="popmenu" hidden>
           <button class="popmenu-item" data-src="cmux"><span class="ic">⌘</span> cmux 워크스페이스</button>
-          <button class="popmenu-item" data-src="github"><span class="ic">⎇</span> GitHub에서 클론…</button>
+          <button class="popmenu-item" data-src="git"><span class="ic">⎇</span> 로컬 Git 저장소…</button>
           <button class="popmenu-item" data-src="folder"><span class="ic">📁</span> 폴더에서 추가…</button>
         </div>
       </div>
@@ -31,29 +31,6 @@
       <pre id="log-body" class="log-body"></pre>
     </section>
   </main>
-
-  <!-- GitHub clone modal -->
-  <div id="clone-overlay" class="overlay" hidden>
-    <div class="modal">
-      <div class="modal-title">GitHub에서 클론</div>
-      <label class="field">
-        <span>저장소 URL</span>
-        <input id="clone-url" type="text" placeholder="https://github.com/owner/repo.git" />
-      </label>
-      <label class="field">
-        <span>클론 위치</span>
-        <div class="field-row">
-          <input id="clone-dir" type="text" placeholder="부모 폴더 선택…" readonly />
-          <button id="clone-pick" class="ghost small">폴더…</button>
-        </div>
-      </label>
-      <div id="clone-status" class="clone-status"></div>
-      <div class="modal-actions">
-        <button id="clone-cancel" class="ghost small">취소</button>
-        <button id="clone-go" class="primary small">클론</button>
-      </div>
-    </div>
-  </div>
 
   <script src="renderer.js"></script>
 </body>
