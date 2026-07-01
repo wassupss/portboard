@@ -18,6 +18,9 @@ interface PortboardApi {
   logs(id: string): Promise<LogLine[]>
   toggleDesktop(): Promise<boolean>
   getDesktop(): Promise<boolean>
+  hideWindow(): Promise<void>
+  getHotkey(): Promise<string>
+  setHotkey(accel: string): Promise<{ ok: boolean; hotkey: string }>
   setLang(l: string): Promise<string>
   openPostman(port: number | null): Promise<any>
   openUrl(port: number): Promise<any>

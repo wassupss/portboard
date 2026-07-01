@@ -12,6 +12,10 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     openBrowserTip: '브라우저로 열기', dockerBuildTip: 'Docker 이미지 빌드', dockerRunTip: '빌드 후 컨테이너 실행',
     postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행', openDockerTip: 'Docker Desktop 열기',
     updateAvailable: '새 버전 v{v} 사용 가능', download: '다운로드',
+    sc_menu: '전역 단축키…', sc_title: '전역 단축키', sc_prompt: '원하는 키 조합을 누르세요',
+    sc_hint: '⌘ / ⌥ / ⌃ / ⇧ 중 하나 이상을 포함해야 합니다.', sc_save: '저장', sc_clear: '끄기',
+    sc_cancel: '취소', sc_none: '(없음)', sc_disabled: '단축키가 꺼집니다.',
+    sc_conflict: '이 조합은 등록할 수 없습니다 (다른 앱과 충돌).',
   },
   en: {
     menu: 'Menu ▾', m_import: 'Import', m_lang: 'Language', toDesktop: 'Desktop window', toMenubar: 'Menu-bar popover',
@@ -23,6 +27,10 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     openBrowserTip: 'Open in browser', dockerBuildTip: 'Build Docker image', dockerRunTip: 'Build then run container',
     postman: 'Postman', postmanTip: 'Copy URL and open Postman', openDockerTip: 'Open Docker Desktop',
     updateAvailable: 'New version v{v} available', download: 'Download',
+    sc_menu: 'Global shortcut…', sc_title: 'Global shortcut', sc_prompt: 'Press the key combination',
+    sc_hint: 'Must include at least one of ⌘ / ⌥ / ⌃ / ⇧.', sc_save: 'Save', sc_clear: 'Disable',
+    sc_cancel: 'Cancel', sc_none: '(none)', sc_disabled: 'Shortcut will be disabled.',
+    sc_conflict: 'Could not register (conflicts with another app).',
   },
 }
 let LANG: 'ko' | 'en' = 'ko'
@@ -236,6 +244,7 @@ function applyStaticI18n() {
   appMenu.querySelector('[data-act="import-cmux"] .label')!.textContent = t('src_cmux')
   appMenu.querySelector('[data-act="import-git"] .label')!.textContent = t('src_git')
   appMenu.querySelector('[data-act="import-folder"] .label')!.textContent = t('src_folder')
+  appMenu.querySelector('[data-act="hotkey"] .label')!.textContent = t('sc_menu')
 }
 
 async function populateMenu() {
@@ -262,6 +271,7 @@ appMenu.querySelectorAll('.popmenu-item').forEach((b) => {
       const l = act.slice(5) as 'ko' | 'en'
       if (l !== LANG) { LANG = l; await window.api.setLang(l); applyStaticI18n(); refresh() }
     } else if (act === 'view') window.api.toggleDesktop()
+    else if (act === 'hotkey') openHotkeyModal()
   }
 })
 dockerBtn.onclick = (e) => { e.stopPropagation(); window.api.openDockerApp() }
@@ -284,6 +294,90 @@ window.api.onFocusRepo((id) => openLogs(id))
 window.api.onLog((d) => { if (d.id === selectedId) appendLog(d.stream, d.text) })
 window.api.onStarted(() => refresh())
 window.api.onExit((d) => { if (d.id === selectedId) appendLog('err', `\n[portboard] exited (code ${d.code})\n`); refresh() })
+
+// ---------- global hotkey settings ----------
+// Pretty-print an Electron accelerator ("Control+Command+P") with mac glyphs.
+function prettyAccel(a: string): string {
+  if (!a) return t('sc_none')
+  const M: Record<string, string> = { Command: '⌘', Cmd: '⌘', Control: '⌃', Ctrl: '⌃', Alt: '⌥', Option: '⌥', Shift: '⇧' }
+  return a.split('+').map((p) => M[p] || p).join(' ')
+}
+const KEYMAP: Record<string, string> = {
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  ' ': 'Space', Enter: 'Return', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete',
+}
+// Build an Electron accelerator from a keydown, or null if it isn't a valid global combo.
+function accelFromEvent(e: KeyboardEvent): string | null {
+  if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return null // modifier alone
+  const mods: string[] = []
+  if (e.metaKey) mods.push('Command')
+  if (e.ctrlKey) mods.push('Control')
+  if (e.altKey) mods.push('Alt')
+  if (e.shiftKey) mods.push('Shift')
+  const main = KEYMAP[e.key] || (e.key.length === 1 ? e.key.toUpperCase() : e.key)
+  const isFn = /^F\d{1,2}$/.test(main)
+  if (!mods.length && !isFn) return null // a global hotkey needs a modifier (function keys excepted)
+  return [...mods, main].join('+')
+}
+
+async function openHotkeyModal() {
+  let captured = await window.api.getHotkey()
+  const overlay = el('div', 'overlay')
+  const modal = el('div', 'modal')
+  modal.appendChild(el('div', 'modal-title', t('sc_title')))
+  const field = el('div', 'field')
+  field.appendChild(el('span', null, t('sc_prompt')))
+  const rec = el('div', 'hotkey-rec')
+  rec.tabIndex = 0
+  rec.textContent = prettyAccel(captured)
+  field.appendChild(rec)
+  modal.appendChild(field)
+  const status = el('div', 'clone-status', t('sc_hint'))
+  modal.appendChild(status)
+  const actions = el('div', 'modal-actions')
+  const clearBtn = el('button', 'ghost small', t('sc_clear'))
+  const cancelBtn = el('button', 'ghost small', t('sc_cancel'))
+  const saveBtn = el('button', 'primary small', t('sc_save'))
+  actions.append(clearBtn, cancelBtn, saveBtn)
+  modal.appendChild(actions)
+  overlay.appendChild(modal)
+  document.body.appendChild(overlay)
+  rec.focus()
+
+  const close = () => overlay.remove()
+  rec.addEventListener('keydown', (e: KeyboardEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) { close(); return }
+    const a = accelFromEvent(e)
+    if (!a) { status.textContent = t('sc_hint'); status.classList.remove('err'); return }
+    captured = a
+    rec.textContent = prettyAccel(a)
+    status.textContent = ''
+    status.classList.remove('err')
+  })
+  clearBtn.onclick = () => { captured = ''; rec.textContent = prettyAccel(''); status.textContent = t('sc_disabled'); status.classList.remove('err') }
+  cancelBtn.onclick = close
+  overlay.onclick = (e) => { if (e.target === overlay) close() }
+  saveBtn.onclick = async () => {
+    const res = await window.api.setHotkey(captured)
+    if (res.ok) close()
+    else { status.textContent = t('sc_conflict'); status.classList.add('err') }
+  }
+}
+
+// ---------- in-window shortcuts ----------
+document.addEventListener('keydown', (e) => {
+  if (document.querySelector('.overlay')) return // a modal is open — it owns the keyboard
+  if (e.key === 'Escape') {
+    if (!logPane.hidden) logCloseBtn.click()          // close the log pane first
+    else if (!appMenu.hidden) appMenu.hidden = true   // then the menu
+    else window.api.hideWindow()                      // then dismiss the popover (menu-bar mode)
+    return
+  }
+  const mod = e.metaKey || e.ctrlKey
+  if (mod && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); refresh() }
+  else if (mod && e.key === ',') { e.preventDefault(); openHotkeyModal() }
+})
 
 // ---------- init ----------
 ;(async () => {

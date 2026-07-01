@@ -19,6 +19,9 @@ const api: PortboardApi = {
 
   toggleDesktop: () => ipcRenderer.invoke('window:toggleDesktop'),
   getDesktop: () => ipcRenderer.invoke('window:getDesktop'),
+  hideWindow: () => ipcRenderer.invoke('window:hide'),
+  getHotkey: () => ipcRenderer.invoke('hotkey:get'),
+  setHotkey: (accel) => ipcRenderer.invoke('hotkey:set', accel),
   setLang: (l) => ipcRenderer.invoke('lang:set', l),
   openPostman: (port) => ipcRenderer.invoke('postman:open', port),
 

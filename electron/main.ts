@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen, clipboard, globalShortcut } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -45,6 +45,29 @@ function loadConfig(): any {
 function saveConfig(cfg: any) {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
+}
+
+// ---------- global hotkey ----------
+// Accelerator (Electron syntax, e.g. "Control+Command+P") stored in config.hotkey.
+// Empty string = disabled. Toggles the popover from anywhere, like Spotlight.
+const DEFAULT_HOTKEY = 'Control+Command+P'
+let registeredHotkey = ''
+
+function currentHotkey(): string {
+  const cfg = loadConfig()
+  return typeof cfg.hotkey === 'string' ? cfg.hotkey : DEFAULT_HOTKEY
+}
+
+// Register `accel` globally, replacing any previous binding. Returns false if the OS
+// rejected it (already taken by another app). Empty accel just clears the binding.
+function applyHotkey(accel: string): boolean {
+  if (registeredHotkey) { try { globalShortcut.unregister(registeredHotkey) } catch {} registeredHotkey = '' }
+  if (!accel) return true
+  try {
+    const ok = globalShortcut.register(accel, () => toggleWindow())
+    if (ok) registeredHotkey = accel
+    return ok
+  } catch { return false }
 }
 
 // ---------- i18n (tray / menus) ----------
@@ -428,6 +451,16 @@ ipcMain.handle('window:toggleDesktop', () => {
   return desktopMode
 })
 ipcMain.handle('window:getDesktop', () => desktopMode)
+ipcMain.handle('window:hide', () => { if (win && !win.isDestroyed() && !desktopMode) win.hide() })
+
+ipcMain.handle('hotkey:get', () => currentHotkey())
+ipcMain.handle('hotkey:set', (_e, accel) => {
+  const a = typeof accel === 'string' ? accel.trim() : ''
+  const ok = applyHotkey(a)
+  if (ok) { const cfg = loadConfig(); cfg.hotkey = a; saveConfig(cfg) }
+  else applyHotkey(currentHotkey()) // registration failed — restore the previous binding
+  return { ok, hotkey: a }
+})
 
 ipcMain.handle('docker:action', (_e, id, action) => dockerAction(id, action))
 ipcMain.handle('docker:tail', (_e, cid) => dockerTailStart(cid))
@@ -572,6 +605,7 @@ app.whenReady().then(() => {
   desktopMode = !!cfg0.desktopMode
   if (app.dock) { desktopMode ? app.dock.show() : app.dock.hide() }
   createTray()
+  applyHotkey(currentHotkey())
   setInterval(refreshTray, 3000)
   if (desktopMode) showWindow()
   app.on('activate', () => showWindow())
@@ -581,6 +615,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {})
+
+app.on('will-quit', () => globalShortcut.unregisterAll())
 
 app.on('before-quit', () => {
   for (const id of running.keys()) stopServer(id)

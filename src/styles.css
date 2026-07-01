@@ -102,6 +102,13 @@ main { flex: 1; display: flex; min-height: 0; position: relative; }
 }
 .field-row { display: flex; gap: 6px; }
 .field-row input { flex: 1; }
+.hotkey-rec {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 42px; font-size: 16px; font-weight: 600; letter-spacing: 2px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer; user-select: none; outline: none;
+}
+.hotkey-rec:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(68,147,248,.3); }
 .clone-status { font-size: 12px; color: var(--muted); margin: 6px 0 12px; white-space: pre-wrap; min-height: 16px; }
 .clone-status.err { color: var(--red); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
