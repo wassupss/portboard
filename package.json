@@ -1,7 +1,7 @@
 {
   "name": "portboard",
   "productName": "Portboard",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Menu-bar dashboard for macOS — see, start and stop your local dev servers and Docker containers, all by port.",
   "main": "build/electron/main.js",
   "author": "wassupss",
@@ -23,14 +23,29 @@
   "build": {
     "appId": "com.wassupss.portboard",
     "productName": "Portboard",
-    "directories": { "buildResources": "build-resources" },
+    "directories": {
+      "buildResources": "build-resources"
+    },
     "afterPack": "scripts/afterpack-adhoc.js",
-    "files": ["build/**", "package.json"],
-    "publish": [{ "provider": "github", "owner": "wassupss", "repo": "portboard", "releaseType": "release" }],
+    "files": [
+      "build/**",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "wassupss",
+        "repo": "portboard",
+        "releaseType": "release"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build-resources/icon.png",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     }
   }
 }
