@@ -145,6 +145,8 @@ main { flex: 1; display: flex; min-height: 0; position: relative; }
 }
 .badge.port { color: var(--accent); border-color: #2c4a73; }
 .badge.fw { color: #d2a8ff; border-color: #4a3a6b; background: #2c2540; }
+.badge.missing { color: #ff9a9a; border-color: #6b3a3a; background: #402525; }
+.row.missing { opacity: 0.6; }
 .controls { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 .script-select {

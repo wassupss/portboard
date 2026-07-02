@@ -9,6 +9,7 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     empty: '실행 중인 서버가 없습니다.<br>“가져오기”로 저장소를 추가하면 여기서 실행할 수 있어요.',
     run: '▶ 실행', stop: '정지', startC: '▶ 시작', restart: '재시작', logs: '로그', folder: '폴더', remove: '목록에서 제거',
     noScript: '실행할 스크립트 없음', open: '↗ 열기', kill: 'kill', back: '← 뒤로', logsTitle: '로그',
+    missing: '경로 없음', missingTip: '폴더를 찾을 수 없습니다 (이동/삭제됨). ✕로 제거하거나 다시 가져오세요.',
     openBrowserTip: '브라우저로 열기', dockerBuildTip: 'Docker 이미지 빌드', dockerRunTip: '빌드 후 컨테이너 실행',
     postman: 'Postman', postmanTip: 'URL 복사 후 Postman 실행', openDockerTip: 'Docker Desktop 열기',
     updateAvailable: '새 버전 v{v} 사용 가능', download: '다운로드',
@@ -24,6 +25,7 @@ const I18N: Record<'ko' | 'en', Record<string, string>> = {
     empty: 'No servers running.<br>Use “Import” to add a repository and run it here.',
     run: '▶ Run', stop: 'Stop', startC: '▶ Start', restart: 'Restart', logs: 'Logs', folder: 'Folder', remove: 'Remove from list',
     noScript: 'No run script', open: '↗ Open', kill: 'kill', back: '← Back', logsTitle: 'Logs',
+    missing: 'Missing', missingTip: 'Folder not found (moved/deleted). Remove it with ✕ or re-import.',
     openBrowserTip: 'Open in browser', dockerBuildTip: 'Build Docker image', dockerRunTip: 'Build then run container',
     postman: 'Postman', postmanTip: 'Copy URL and open Postman', openDockerTip: 'Open Docker Desktop',
     updateAvailable: 'New version v{v} available', download: 'Download',
@@ -86,6 +88,21 @@ function makeCard(running: boolean, name: string, pathText?: string) {
 function repoRow(r: any): any {
   repoNames[r.id] = r.name
   const { row, badges, controls } = makeCard(r.running, r.name, r.path)
+
+  // Path no longer exists (folder moved/deleted): flag it instead of faking an 'npm' badge.
+  if (r.exists === false) {
+    row.classList.add('missing')
+    const m = el('span', 'badge missing', t('missing'))
+    m.title = t('missingTip')
+    badges.appendChild(m)
+    const folder = el('button', 'ghost small', t('folder'))
+    folder.onclick = () => window.api.openPath(r.path)
+    const rm = el('button', 'ghost small', '✕')
+    rm.title = t('remove')
+    rm.onclick = async () => { await window.api.removeRepo(r.id); refresh() }
+    controls.append(folder, rm)
+    return row
+  }
 
   if (r.port) badges.appendChild(portBadge(r.port))
   if (r.framework) badges.appendChild(el('span', 'badge fw', r.framework))

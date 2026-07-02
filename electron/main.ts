@@ -211,6 +211,15 @@ async function snapshot() {
   const repoPaths = cfg.repos.map((r: any) => r.path)
 
   const repos = cfg.repos.map((r: any) => {
+    // Folder gone (moved/deleted): flag it rather than running repoMeta, which would otherwise
+    // fall back to an 'npm' badge for a repo that has no package.json to read.
+    if (!fs.existsSync(r.path)) {
+      return {
+        ...r, exists: false, pm: null, hasStart: false, scripts: [], git: null,
+        dockerfile: false, framework: null, isBackend: false,
+        managed: false, running: false, port: null, pid: null,
+      }
+    }
     const meta = repoMeta(r.path)
     // Listening pids owned by this repo (deepest match wins so a parent repo doesn't absorb a
     // child's server). Prefer the lowest port (the app port, not an ephemeral HMR/inspector one).
@@ -218,7 +227,7 @@ async function snapshot() {
     const match = matched[0]
     const managed = running.has(r.id)
     return {
-      ...r,
+      ...r, exists: true,
       pm: r.pm || meta.pm,
       hasStart: meta.hasStart,
       scripts: meta.scripts,
@@ -242,7 +251,12 @@ async function snapshot() {
 // ---------- cmux import ----------
 function importCmuxWorkspaces() {
   const ev = path.join(os.homedir(), '.cmuxterm', 'events.jsonl')
-  try { return parseCmuxEvents(fs.readFileSync(ev, 'utf8'), path.basename) } catch { return [] }
+  // events.jsonl is append-only, so it still lists workspaces whose folder was since moved or
+  // deleted — drop those so stale paths don't get re-added on every import.
+  try {
+    return parseCmuxEvents(fs.readFileSync(ev, 'utf8'), path.basename)
+      .filter((ws) => { try { return fs.existsSync(ws.path) } catch { return false } })
+  } catch { return [] }
 }
 
 // ---------- docker ----------
@@ -399,6 +413,9 @@ ipcMain.handle('repo:addGit', async () => {
 
 ipcMain.handle('repo:importCmux', () => {
   const cfg = loadConfig()
+  // Reconcile: drop repos whose folder no longer exists (moved/deleted) before syncing in the
+  // current cmux workspaces, so a re-import clears stale entries instead of piling them up.
+  cfg.repos = cfg.repos.filter((r: any) => { try { return fs.existsSync(r.path) } catch { return false } })
   const existing = new Set(cfg.repos.map((r: any) => r.path))
   for (const ws of importCmuxWorkspaces()) {
     if (!existing.has(ws.path)) {
