@@ -134,8 +134,10 @@ function startServer(repo: any) {
     ? `${pm} run build && ${pm} run ${script}`
     : `${pm} run ${script}`
 
-  // Login shell so PATH/version-manager shims resolve like a Terminal; detached → own group.
-  const child = spawn(shellPath, ['-lc', cmd], {
+  // Interactive login shell (-i) so version-manager shims configured in ~/.zshrc (nvm, and the
+  // pnpm/node it puts on PATH) resolve like a Terminal — a plain login shell skips ~/.zshrc and
+  // would fail to find pnpm. Detached → own process group.
+  const child = spawn(shellPath, ['-ilc', cmd], {
     cwd: repo.path,
     detached: true,
     env: { ...process.env, FORCE_COLOR: '0' },
