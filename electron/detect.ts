@@ -116,16 +116,26 @@ export function parseDockerPs(stdout: string): ContainerInfo[] {
   return out
 }
 
-// Parse cmux events.jsonl → unique workspaces (latest per id). `basename` injected to stay pure.
+// Parse cmux events.jsonl → unique workspaces, one per folder. `basename` injected to stay pure.
+//
+// cmux stamps the title into created/selected/closed events at that moment and has NO rename event,
+// so the log can hold a stale default ("Terminal 13") for a workspace you renamed but haven't
+// re-selected. We therefore key by cwd, keep the latest *custom* title we ever saw for it, and fall
+// back to the folder name — never cmux's throwaway `title` default.
 export function parseCmuxEvents(content: string, basename: (p: string) => string): Workspace[] {
-  const out = new Map<string, Workspace>()
+  const out = new Map<string, Workspace>()   // cwd → workspace (Map preserves first-seen order)
   for (const line of content.split('\n')) {
-    if (!line.includes('"workspace.selected"')) continue
+    if (!line.includes('"workspace.selected"') &&
+        !line.includes('"workspace.created"') &&
+        !line.includes('"workspace.closed"')) continue
     try {
       const o = JSON.parse(line)
       const p = o.payload || {}
       if (!p.cwd) continue
-      out.set(p.workspace_id || p.cwd, { name: p.custom_title || p.title || basename(p.cwd), path: p.cwd })
+      const custom = typeof p.custom_title === 'string' && p.custom_title.trim() ? p.custom_title : ''
+      const existing = out.get(p.cwd)
+      if (!existing) out.set(p.cwd, { name: custom || basename(p.cwd), path: p.cwd })
+      else if (custom) existing.name = custom   // a later custom title wins; basename never overrides one
     } catch {}
   }
   return [...out.values()]

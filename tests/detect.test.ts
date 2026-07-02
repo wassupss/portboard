@@ -158,6 +158,30 @@ describe('parseCmuxEvents', () => {
       { name: 'web', path: '/a/web' },
     ])
   })
+
+  it('never uses the default "Terminal N" title; falls back to the folder name', () => {
+    const lines = [
+      JSON.stringify({ name: 'workspace.created', payload: { workspace_id: 'w9', custom_title: null, title: 'Terminal 13', cwd: '/a/rentalpay' } }),
+      JSON.stringify({ name: 'workspace.selected', payload: { workspace_id: 'w9', custom_title: null, title: 'Terminal 13', cwd: '/a/rentalpay' } }),
+    ].join('\n')
+    expect(parseCmuxEvents(lines, basename)).toEqual([{ name: 'rentalpay', path: '/a/rentalpay' }])
+  })
+
+  it('keeps a custom title even if a later event for the same folder omits it', () => {
+    const lines = [
+      JSON.stringify({ name: 'workspace.selected', payload: { workspace_id: 'w1', custom_title: '렌탈페이', cwd: '/a/pay' } }),
+      JSON.stringify({ name: 'workspace.selected', payload: { workspace_id: 'w1', custom_title: null, title: 'Terminal 5', cwd: '/a/pay' } }),
+    ].join('\n')
+    expect(parseCmuxEvents(lines, basename)).toEqual([{ name: '렌탈페이', path: '/a/pay' }])
+  })
+
+  it('collapses multiple tabs on the same folder, preferring the named one', () => {
+    const lines = [
+      JSON.stringify({ name: 'workspace.selected', payload: { workspace_id: 'a', custom_title: null, title: 'Terminal 11', cwd: '/a/web' } }),
+      JSON.stringify({ name: 'workspace.selected', payload: { workspace_id: 'b', custom_title: '청소 웹', cwd: '/a/web' } }),
+    ].join('\n')
+    expect(parseCmuxEvents(lines, basename)).toEqual([{ name: '청소 웹', path: '/a/web' }])
+  })
 })
 
 describe('filterDiscovered', () => {
