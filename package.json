@@ -1,7 +1,7 @@
 {
   "name": "portboard",
   "productName": "Portboard",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Menu-bar dashboard for macOS — see, start and stop your local dev servers and Docker containers, all by port.",
   "main": "build/electron/main.js",
   "author": "wassupss",
